@@ -20,13 +20,22 @@ import {
   Check,
   CircleHelp,
 } from "lucide-react";
+import { useDeviceParking } from "./hooks/useDeviceParking";
 import { useParking } from "./hooks/useParking";
 import ParkingMap from "./components/ParkingMap";
 import ActivityHistory, { formatTime } from "./components/ActivityHistory";
 import { STATUSES } from "./services/parking";
 
 export default function App() {
-  const parking = useParking();
+  const simulation = useParking();
+  const [mode, setMode] = useState("simulation");
+  const device = useDeviceParking(mode === "device");
+  const isDevice = mode === "device";
+  const parking = isDevice ? device : simulation;
+  function changeMode(next) {
+    simulation.setRunning(false);
+    setMode(next);
+  }
   const [selected, setSelected] = useState("P01");
   const [pointer, setPointer] = useState({ x: 0, y: 0 });
   const reduced = useReducedMotion();
@@ -80,13 +89,27 @@ export default function App() {
             </div>
           </a>
           <div className="header-status">
-            <span className="device-badge">
-              <Unplug size={14} />
-              <span>Device: Not Connected</span>
+            <span
+              className={`device-badge ${isDevice && device.deviceOnline ? "device-online" : ""}`}
+            >
+              {isDevice && device.deviceOnline ? (
+                <Radio size={14} />
+              ) : (
+                <Unplug size={14} />
+              )}
+              <span>
+                {isDevice
+                  ? device.backendReachable
+                    ? device.deviceOnline
+                      ? "Device: Online"
+                      : "Device: Offline"
+                    : "Device: Unconfirmed"
+                  : "Device: Not Connected"}
+              </span>
             </span>
             <span className="simulation-badge">
-              <FlaskConical size={14} />
-              Simulation Mode
+              {isDevice ? <Cpu size={14} /> : <FlaskConical size={14} />}
+              {isDevice ? "Device Mode" : "Simulation Mode"}
             </span>
           </div>
         </div>
@@ -104,11 +127,41 @@ export default function App() {
           </div>
           <div className="local-status">
             <span className={`tiny-dot ${parking.running ? "running" : ""}`} />
-            {parking.running
-              ? "Auto simulation running"
-              : "Local simulation ready"}
-            <span className="local-sub">No hardware required</span>
+            {isDevice
+              ? device.backendReachable
+                ? device.transport === "Live"
+                  ? "Live device data"
+                  : "HTTP polling · reconnecting"
+                : "Connecting to backend"
+              : parking.running
+                ? "Auto simulation running"
+                : "Local simulation ready"}
+            <span className="local-sub">
+              {isDevice ? "HTTP + WebSocket/STOMP" : "No hardware required"}
+            </span>
           </div>
+        </div>
+        <div className="source-bar">
+          <span>DATA SOURCE</span>
+          <div className="mode-switch" role="group" aria-label="Data source">
+            <button
+              aria-pressed={!isDevice}
+              onClick={() => changeMode("simulation")}
+            >
+              <FlaskConical size={15} /> Simulation
+            </button>
+            <button
+              aria-pressed={isDevice}
+              onClick={() => changeMode("device")}
+            >
+              <Cpu size={15} /> Device
+            </button>
+          </div>
+          <small>
+            {isDevice
+              ? "Persisted sensor data · read only"
+              : "Local demo · no database writes"}
+          </small>
         </div>
         <section
           className="stats-grid"
@@ -181,134 +234,192 @@ export default function App() {
           </motion.div>
           <ActivityHistory events={parking.events} />
         </div>
-        <section className="panel simulation-panel">
-          <div className="simulation-title">
-            <span className="control-icon">
-              <FlaskConical size={20} />
-            </span>
+        {isDevice ? (
+          <section
+            className="panel device-panel"
+            aria-label="Device connection"
+          >
             <div>
-              <h2>Simulation playground</h2>
-              <p>A real-time feel, without the hardware.</p>
+              <Cpu size={22} />
+              <h2>ESP8266 · Sensor feed</h2>
             </div>
-            <span
-              className={`paused-badge ${parking.running ? "is-running" : ""}`}
-            >
-              <span className="tiny-dot" />
-              {parking.running ? "Running" : "Paused"}
-            </span>
-          </div>
-          <div className="controls-body">
-            <div className="manual-controls">
-              <label htmlFor="space">PARKING SPACE</label>
-              <div className="manual-row">
-                <div className="select-wrap">
-                  <select
-                    id="space"
-                    value={selected}
-                    onChange={(e) => setSelected(e.target.value)}
-                  >
-                    {parking.spaces.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.id}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown size={14} />
-                </div>
-                <div
-                  className="status-switch"
-                  role="group"
-                  aria-label={`Set ${selected} status`}
-                >
-                  {STATUSES.map((status) => (
-                    <button
-                      key={status}
-                      className={
-                        current.status === status ? `selected ${status}` : ""
-                      }
-                      aria-pressed={current.status === status}
-                      onClick={() => parking.update(selected, status)}
+            <p role="status">
+              {device.backendReachable
+                ? device.deviceOnline
+                  ? "Device heartbeat received. Sensor readings expire independently."
+                  : "No recent device heartbeat. Waiting for sensor data."
+                : "Backend unavailable or connecting. Availability is unconfirmed until fresh data arrives."}
+            </p>
+            <dl>
+              <div>
+                <dt>Device ID</dt>
+                <dd>esp8266-01</dd>
+              </div>
+              <div>
+                <dt>Updates</dt>
+                <dd>
+                  {device.backendReachable
+                    ? device.transport === "Live"
+                      ? "WebSocket live"
+                      : "HTTP polling / reconnecting"
+                    : "Waiting for backend"}
+                </dd>
+              </div>
+              <div>
+                <dt>Last seen</dt>
+                <dd>{formatTime(device.device.lastSeenAt)}</dd>
+              </div>
+              <div>
+                <dt>Sensor timeout</dt>
+                <dd>{device.staleAfterSeconds}s</dd>
+              </div>
+            </dl>
+            <p className="device-note">
+              Send sensor readings to POST /api/device/status. Simulation
+              controls are available in Simulation Mode.
+            </p>
+          </section>
+        ) : (
+          <section className="panel simulation-panel">
+            <div className="simulation-title">
+              <span className="control-icon">
+                <FlaskConical size={20} />
+              </span>
+              <div>
+                <h2>Simulation playground</h2>
+                <p>A real-time feel, without the hardware.</p>
+              </div>
+              <span
+                className={`paused-badge ${parking.running ? "is-running" : ""}`}
+              >
+                <span className="tiny-dot" />
+                {parking.running ? "Running" : "Paused"}
+              </span>
+            </div>
+            <div className="controls-body">
+              <div className="manual-controls">
+                <label htmlFor="space">PARKING SPACE</label>
+                <div className="manual-row">
+                  <div className="select-wrap">
+                    <select
+                      id="space"
+                      value={selected}
+                      onChange={(e) => setSelected(e.target.value)}
                     >
-                      {current.status === status && <Check size={13} />}
-                      <span>{status}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className="auto-controls">
-              <label htmlFor="speed">AUTO SIMULATION</label>
-              <div className="auto-row">
-                <button
-                  className="primary-button"
-                  onClick={() => parking.setRunning(!parking.running)}
-                >
-                  {parking.running ? <Pause size={14} /> : <Play size={14} />}
-                  <span>
-                    {parking.running ? "Pause simulation" : "Start simulation"}
-                  </span>
-                </button>
-                <div className="select-wrap speed-select">
-                  <select
-                    id="speed"
-                    value={parking.interval}
-                    onChange={(e) =>
-                      parking.setIntervalSeconds(Number(e.target.value))
-                    }
+                      {parking.spaces.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.id}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={14} />
+                  </div>
+                  <div
+                    className="status-switch"
+                    role="group"
+                    aria-label={`Set ${selected} status`}
                   >
-                    <option value={3}>Every 3s</option>
-                    <option value={5}>Every 5s</option>
-                    <option value={10}>Every 10s</option>
-                  </select>
-                  <ChevronDown size={13} />
+                    {STATUSES.map((status) => (
+                      <button
+                        key={status}
+                        className={
+                          current.status === status ? `selected ${status}` : ""
+                        }
+                        aria-pressed={current.status === status}
+                        onClick={() => parking.update(selected, status)}
+                      >
+                        {current.status === status && <Check size={13} />}
+                        <span>{status}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <button
-                  className="icon-button outlined"
-                  title="Simulate one random state change"
-                  aria-label="Simulate one random state change"
-                  onClick={parking.randomize}
-                >
-                  <Shuffle size={16} />
-                </button>
-                <button
-                  className="icon-button outlined"
-                  title="Reset to initial states and sample history"
-                  aria-label="Reset simulation"
-                  onClick={parking.reset}
-                >
-                  <RotateCcw size={16} />
-                </button>
+              </div>
+              <div className="auto-controls">
+                <label htmlFor="speed">AUTO SIMULATION</label>
+                <div className="auto-row">
+                  <button
+                    className="primary-button"
+                    onClick={() => parking.setRunning(!parking.running)}
+                  >
+                    {parking.running ? <Pause size={14} /> : <Play size={14} />}
+                    <span>
+                      {parking.running
+                        ? "Pause simulation"
+                        : "Start simulation"}
+                    </span>
+                  </button>
+                  <div className="select-wrap speed-select">
+                    <select
+                      id="speed"
+                      value={parking.interval}
+                      onChange={(e) =>
+                        parking.setIntervalSeconds(Number(e.target.value))
+                      }
+                    >
+                      <option value={3}>Every 3s</option>
+                      <option value={5}>Every 5s</option>
+                      <option value={10}>Every 10s</option>
+                    </select>
+                    <ChevronDown size={13} />
+                  </div>
+                  <button
+                    className="icon-button outlined"
+                    title="Simulate one random state change"
+                    aria-label="Simulate one random state change"
+                    onClick={parking.randomize}
+                  >
+                    <Shuffle size={16} />
+                  </button>
+                  <button
+                    className="icon-button outlined"
+                    title="Reset to initial states and sample history"
+                    aria-label="Reset simulation"
+                    onClick={parking.reset}
+                  >
+                    <RotateCcw size={16} />
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-          <div className="simulation-note">
-            <Info size={14} />
-            <span>
-              Click a parking space to select it. Change its status above, or
-              let the simulation do the driving.
-            </span>
-          </div>
-        </section>
+            <div className="simulation-note">
+              <Info size={14} />
+              <span>
+                Click a parking space to select it. Change its status above, or
+                let the simulation do the driving.
+              </span>
+            </div>
+          </section>
+        )}
         <section className="system-strip" aria-label="System information">
           <div>
             <span className="system-icon">
               <Cpu size={17} />
             </span>
             <div>
-              <strong>Built for the real world.</strong>
-              <span>Running locally for now.</span>
+              <strong>
+                {isDevice
+                  ? "Connected by design."
+                  : "Built for the real world."}
+              </strong>
+              <span>
+                {isDevice
+                  ? "PostgreSQL stores every change."
+                  : "Running locally in simulation."}
+              </span>
             </div>
           </div>
           <div className="data-flow">
             <span className="source-active">
               <FlaskConical size={13} />
-              Simulation
+              {isDevice ? "ESP8266 / HTTP" : "Simulation"}
             </span>
             <ArrowRight size={13} />
             <span>React dashboard</span>
             <span className="flow-divider" />
             <span>
-              Future: ESP8266 + Socket.IO <ArrowUpRight size={12} />
+              {isDevice ? "Spring Boot + WebSocket" : "Device Mode available"}{" "}
+              <ArrowUpRight size={12} />
             </span>
           </div>
           <span className="last-update">

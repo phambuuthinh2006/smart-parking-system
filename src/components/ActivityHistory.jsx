@@ -8,11 +8,13 @@ import {
 } from "lucide-react";
 import { Status } from "./ParkingMap";
 export const formatTime = (time) =>
-  new Date(time).toLocaleTimeString("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+  time == null
+    ? "—"
+    : new Date(time).toLocaleTimeString("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
 export default function ActivityHistory({ events }) {
   const [filter, setFilter] = useState("all");
   const filtered = events.filter(

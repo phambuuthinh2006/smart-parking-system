@@ -1,0 +1,23 @@
+server:
+  port: ${PORT:18080}
+  max-http-request-header-size: 8KB
+  error:
+    include-message: never
+    include-stacktrace: never
+spring:
+  application:
+    name: smart-parking
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:55432/parking}
+    username: ${POSTGRES_USER:parking}
+    password: ${POSTGRES_PASSWORD}
+    hikari:
+      maximum-pool-size: 5
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+parking:
+  device-key: ${DEVICE_API_KEY}
+  stale-after-seconds: ${DEVICE_TIMEOUT_SECONDS:45}
+  expiry-check-ms: ${EXPIRY_CHECK_MS:5000}
+  allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173}

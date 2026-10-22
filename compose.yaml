@@ -1,0 +1,35 @@
+name: smart-parking
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: parking
+      POSTGRES_USER: parking
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run npm run backend:init first}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - parking-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U parking -d parking"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/parking
+      POSTGRES_USER: parking
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DEVICE_API_KEY: ${DEVICE_API_KEY:?Run npm run backend:init first}
+      DEVICE_TIMEOUT_SECONDS: ${DEVICE_TIMEOUT_SECONDS:-45}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173}
+    ports:
+      - "${API_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-18080}:18080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  parking-data:

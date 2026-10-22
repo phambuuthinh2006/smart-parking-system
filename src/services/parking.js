@@ -9,15 +9,13 @@ export function initialState(now = Date.now()) {
   const spaces = initialSpaces();
   return {
     spaces,
-    events: [...spaces]
-      .reverse()
-      .map((space, i) => ({
-        ...space,
-        id: `initial-${space.id}`,
-        spaceId: space.id,
-        time: now - i * 37000,
-        source: "Sample data",
-      })),
+    events: [...spaces].reverse().map((space, i) => ({
+      ...space,
+      id: `initial-${space.id}`,
+      spaceId: space.id,
+      time: now - i * 37000,
+      source: "Sample data",
+    })),
     sequence: 0,
     lastUpdate: now,
   };
@@ -30,8 +28,7 @@ export function statistics(spaces) {
     unknown: spaces.filter((s) => s.status === "unknown").length,
   };
 }
-// All data sources enter through this reducer. A future HTTP/Socket.IO adapter can
-// dispatch the same update action after validating telemetry, without changing the UI.
+// Local simulation reducer. Device snapshots use a separate, validated adapter.
 export function parkingReducer(state, action) {
   if (action.type === "reset") return initialState(action.time);
   if (

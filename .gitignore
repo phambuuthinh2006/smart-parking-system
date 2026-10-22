@@ -5,3 +5,11 @@ dist/
 playwright-report/
 test-results/
 .cache/
+.env
+.env.*
+!.env.example
+backend/target/
+
+# Local IDE metadata
+.idea/
+*.iml

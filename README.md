@@ -1,45 +1,68 @@
 # Smart Parking System
 
-Frontend-only university IoT dashboard. React + Vite + Tailwind CSS v4 (Vite plugin), Lucide React, and Motion for vehicle presence and subtle pointer parallax. No backend or hardware is required.
+Dashboard React + Vite + Tailwind CSS với backend **Spring Boot 3.5 / Java 17**, **PostgreSQL 16** và **WebSocket/STOMP**. Prototype gồm bốn chỗ P01–P04, một thiết bị `esp8266-01`.
 
-## Run locally
+## Chạy nhanh
 
-Requires Node.js 20.19+ or 22.12+ and npm.
+Cần Node.js **22.12+**, npm và Docker Compose. Docker sẽ build Java; không cần cài Maven/Java trên máy khi dùng cách này.
 
 ```sh
 npm install
+npm run backend:up
 npm run dev
 ```
 
-Open the local URL printed by Vite. Build with `npm run build`, serve the build with `npm run preview`, and check simulation logic with `npm test`.
+Mở URL Vite in ra (thường http://localhost:5173). Chọn **Device** để xem dữ liệu backend. Lần build Docker đầu tiên cần tải image/dependencies và có thể mất vài phút. API: http://127.0.0.1:18080/api/parking/status. Xem log bằng `npm run backend:logs`.
 
-## Share a public preview
+`backend:up` tạo `.env` với mật khẩu PostgreSQL và device key ngẫu nhiên, không ghi đè cấu hình đã có. File này được gitignore; không đưa key vào frontend hay biến `VITE_*`.
+
+Chỉ xem giao diện: `npm run dev` vẫn chạy độc lập, mặc định **Simulation** (P01/P03 occupied; P02/P04 available). Chế độ này không gọi API hoặc ghi database. Chuyển sang Device sẽ dừng auto simulation. Device Mode khởi đầu unknown, không dùng mẫu lịch sử của Simulation.
+
+## Test luồng HTTP → database → dashboard
+
+Khi backend đã khởi động, ở terminal khác:
+
+```sh
+npm run device:simulate
+```
+
+Đây là **trình giả lập HTTP của mạch**, không phải ESP8266 thật. Chọn Device trên dashboard để thấy dữ liệu lưu và cập nhật qua WebSocket. Ctrl+C dừng giả lập; sau khoảng 45–50 giây, các chỗ chuyển Unknown và thiết bị Offline. Không có mẫu dữ liệu nào tự được seed vào database.
+
+```sh
+npm test              # simulation + adapter/freshness/order tests
+npm run build         # production frontend build
+npm run test:backend  # Java 17+, PostgreSQL đang chạy; tự tạo DB parking_test riêng
+npm run backend:down  # dừng stack, GIỮ dữ liệu trong named volume
+```
+
+Maven Wrapper có sẵn trong `backend/`, tải Maven kèm checksum. Test backend chỉ xóa fixture trong database `parking_test`, không dùng database `parking` của ứng dụng.
+
+## Nối mạch và cấu hình
+
+Xem **[hướng dẫn backend & ESP8266](docs/BACKEND.md)**: HTTP contract, device key, cổng LAN, timeout, cách chạy Java trực tiếp và cấu hình frontend khi host riêng.
+
+- Dashboard nhận `/topic/parking` qua STOMP tại `/ws`; đây **không phải Socket.IO**.
+- Reconnect tự động và HTTP polling 10 giây để khôi phục snapshot bị lỡ.
+- Mất backend 25 giây: các trạng thái chưa thể xác nhận hiển thị Unknown, không báo thiết bị online.
+- Heartbeat xác nhận thiết bị còn phản hồi; mỗi sensor phải có báo cáo riêng còn hạn.
+- Database giữ lịch sử thay đổi; dashboard và API history hiển thị tối đa 100 bản ghi gần nhất. CSV xuất theo bộ lọc đang chọn.
+
+## Chia sẻ frontend
 
 ```sh
 npm run share
 ```
 
-This starts Vite and a Cloudflare Quick Tunnel together. Wait for `PUBLIC DASHBOARD: https://...trycloudflare.com`, then share that URL. You do not need to start `npm run dev` separately. Press **Ctrl+C** to stop both services. Each run creates a temporary public URL; anyone with the link can open the simulated dashboard while the command runs. Simulation state is local to each browser tab.
+Lệnh mở Vite + Cloudflare Quick Tunnel, in URL HTTPS tạm thời; Ctrl+C dừng cả hai. Simulation chạy ngay. Nếu muốn Device Mode qua tunnel, backend phải chạy và cần thêm **đúng origin HTTPS của tunnel** vào `ALLOWED_ORIGINS`, rồi recreate backend. Không chia sẻ `.env` hoặc device key. Chế độ Device cho người có URL quyền đọc trạng thái/lịch sử; prototype chưa có đăng nhập người xem.
 
-On Linux, the command downloads the official cloudflared 2026.10.1 binary into the ignored `.cache/` directory on the first run and reuses it afterward. No Cloudflare account, token, or administrator installation is needed. If cloudflared is already on PATH, it is used directly. On other systems, install [cloudflared](https://developers.cloudflare.com/tunnel/downloads/) first, or set `CLOUDFLARED_BIN` to its executable path.
+Vite bind loopback khi share, giữ kiểm tra Host, tự chọn cổng khác nếu 5173 bận. Nếu dùng cổng khác, thêm origin đó vào `ALLOWED_ORIGINS` để WebSocket được chấp nhận. Chi tiết frontend triển khai Vercel: backend Spring Boot/PostgreSQL cần host riêng có HTTPS/WSS; Vercel chỉ chạy bản frontend này.
 
-Vite stays bound to loopback for sharing. The tunnel rewrites the origin Host header to localhost, preserving Vite's host checks. If port 5173 is busy, Vite chooses another available port automatically.
+## Cấu trúc
 
-## Using the dashboard
+- `backend/`: REST, JDBC transactions, Flyway migrations, STOMP, integration tests.
+- `src/services/parking.js`, `useParking`: local simulation.
+- `src/services/deviceParking.js`, `useDeviceParking`: validate snapshot, revision ordering, reconnect, freshness.
+- `compose.yaml`: PostgreSQL và backend, volume riêng; không sử dụng database của dự án khác.
+- `docs/VERIFICATION.md`: kết quả kiểm thử và giới hạn thực tế.
 
-- Select one of the four parking bays or choose it in the simulation controls.
-- Set Available, Occupied, or Unknown. Counts and activity update together.
-- Start/pause automatic simulation and choose a 3, 5, or 10 second interval.
-- Shuffle simulates one random arrival/departure. Reset pauses and restores the initial states and four sample events.
-- Filter history by status and download the filtered records as CSV.
-- History retains the most recent 100 events. State lives in memory and reload restores the initial scenario.
-
-Initial state: P01/P03 occupied, P02/P04 available. Unknown bays never count as confirmed available or occupied. Initial history is labeled Sample data; subsequent events identify their manual or automatic simulation source. The ESP8266 is always labeled Not Connected.
-
-## Architecture and future integration
-
-`src/services/parking.js` contains state transitions, input validation, derived statistics, and simulated updates. `src/hooks/useParking.js` owns lifecycle and timers. The components render shared state without separate counters.
-
-A future telemetry adapter can dispatch `{ type: 'update', spaceId: 'P01', status: 'occupied', time: Date.now(), source: 'ESP8266' }` through the same reducer. Before production integration, add authenticated/validated transport, ordered device timestamps, stale sensor handling, connection lifecycle, and backend persistence. Only then replace the simulation and disconnected device labels with actual telemetry status. No Express, SQL, Socket.IO transport, authentication, or firmware is implemented here.
-
-The UI uses local SVG vehicles with no stock photos or external font requests. CSS handles basic transitions; Motion handles vehicle entry/exit and a two-pixel pointer parallax. Reduced-motion preferences are respected.
+Không có authentication người dùng, thanh toán hoặc firmware cảm biến hoàn chỉnh. Chưa xác minh với phần cứng thật. SVG xe được vẽ trong mã; không tải ảnh/font ngoài.

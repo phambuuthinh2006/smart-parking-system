@@ -1796,3 +1796,22 @@ footer {
     display: none;
   }
 }
+
+/* Sensor source selection and live device summary. */
+.source-bar { display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin:0 0 22px; }
+.source-bar > span { color:#64748b; font-size:10px; font-weight:700; letter-spacing:1.5px; }
+.source-bar small { color:#64748b; font-size:12px; }
+.mode-switch { display:flex; padding:4px; background:#e2e8f0; border-radius:10px; gap:4px; }
+.mode-switch button { display:flex; align-items:center; gap:7px; padding:8px 13px; border:0; border-radius:7px; background:transparent; color:#64748b; cursor:pointer; font:inherit; font-size:12px; font-weight:600; transition:background .2s,color .2s; }
+.mode-switch button[aria-pressed="true"] { background:#fff; color:#0369a1; box-shadow:0 1px 3px #17263812; }
+.mode-switch button:focus-visible { outline:2px solid #0284c7; outline-offset:2px; }
+.device-panel { padding:24px; margin-top:24px; }
+.device-panel > div { display:flex; gap:12px; align-items:center; color:#0284c7; }
+.device-panel h2 { margin:0; font-size:17px; color:#172638; }
+.device-panel p { font-size:13px; color:#64748b; line-height:1.7; }
+.device-panel dl { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; margin:22px 0; }
+.device-panel dt { color:#64748b; font-size:11px; margin-bottom:8px; }
+.device-panel dd { margin:0; font-size:13px; color:#172638; overflow-wrap:anywhere; }
+.device-note { border-top:1px solid #e2e8f0; padding-top:14px; overflow-wrap:anywhere; }
+@media(max-width:680px) { .source-bar { gap:10px; } .source-bar small { flex-basis:100%; } .device-panel { padding:20px; } .device-panel dl { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+.device-badge.device-online { background:#d1fae5; color:#047857; border-color:#a7f3d0; }
