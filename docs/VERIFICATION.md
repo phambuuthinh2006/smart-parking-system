@@ -1,5 +1,29 @@
 # Verification
 
+## Firmware alarm policy — 2026-10-31 (50/45°C update)
+
+- Supersedes the earlier 80°C prototype rule below. Defaults now match the supplied firmware constants: ON >=50°C, OFF <=45°C, retain prior state between them, LED toggles every 300ms, FIRE_OPENS_GATE true.
+- Flyway V3 applied successfully. Readings/events retain previous policy values; sensor state waits for a new reading under the updated policy. Separate alarm_active latch is stored, not inferred from the latest temperature alone.
+- Java suite: **17/17 pass** (16 integration + one unit). Adds boundary/holding behavior and alarm/gate latch surviving timeout and reactivation at 47°C. Node suite: **19/19 pass**. Frontend build succeeds.
+- Browser verified both Simulation and Device: 49 cold normal → 50 alarm → 47 held alarm → 45 normal → 47 remains normal, with matching gate request preview and browser siren.
+- Verified 600ms full LED cycle (=300ms per ON/OFF phase), mute/clear, reset policy, no JS errors and widths 320/390/768/1440 without overflow.
+- Restarted backend while alarm was held at 47°C; another 47°C reading remained ALARM and gateOpenRequested true, demonstrating persistence of the latch. No hardware gate command or actual position was tested/claimed.
+- Obsidian presentation sections 15–16 were rewritten with the new parameters, hysteresis example, SQL and ready-to-read narration.
+
+## Temperature and fire-alarm integration — 2026-10-31
+
+- Flyway V2 adds `temperature_sensor`, `temperature_reading`, `fire_alarm_event` to the same PostgreSQL database. Applied on the live project database; the 466 existing parking events and their earliest ID were preserved across migration.
+- `npm run test:backend`: **16/16 pass, 0 skipped** (15 integration + one unit), on isolated `parking_test`. Adds strict 80/80.01 boundary, authenticated input validation/precision, atomic rejection, every-reading persistence versus transition-only events, independent timestamp replay, concurrency, expiry and committed temperature STOMP payloads.
+- `npm test`: **19/19 pass** (parking, device adapter, local heat simulation and Device temperature validation/freshness/event-label tests).
+- `npm run build`: pass; Docker backend rebuilt and started successfully. Existing V1 migration remains unchanged.
+- Browser: actual authenticated HTTP → PostgreSQL → STOMP → local Device Mode. Verified 80°C NORMAL, 81°C ALARM, optical indicator, opt-in Web Audio and persisted event history. At least one new temperature frame was observed on STOMP.
+- Browser reload kept readings/events; local Simulation changes did not write a temperature reading or replace the Device value. Device inputs are read-only.
+- Real timeout test: sent no temperature for >45s while sending heartbeat; Device stayed Online, temperature became UNKNOWN, TIMEOUT event retained previous ALARM and was not labeled cleared, all siren oscillators stopped.
+- Restarted backend, verified prior readings/events remained, and sent 27°C; browser recovered NORMAL without reload.
+- Widths 320, 390, 768, 1440 had no horizontal overflow. Device screenshots: `screenshots/fire-device-desktop.png` and `fire-device-mobile.png`; local simulation screenshots are also included.
+- `temperature:simulate -- --temperature 80 --once` and `81 --once` verified against live API; invalid input is rejected by the CLI. Every listed SQL in FIRE_ALARM.md was checked in a read-only transaction.
+- No physical temperature sensor, hardware buzzer or hardware LED command path was tested. Device UI previews browser alarms; it does not claim that muting browser sound controls the circuit. Frontend changes are local and have not yet been pushed/deployed in this phase.
+
 ## Backend integration — 2026-10-22
 
 Environment: Java 17.0.20.1, Spring Boot 3.5.16, PostgreSQL 16, Node 26.11.1, headless Chromium.

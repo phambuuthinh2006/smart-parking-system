@@ -23,15 +23,18 @@ public class ParkingService {
   private final JdbcTemplate db;
   private final ApplicationEventPublisher publisher;
   private final int staleSeconds;
+  private final TemperatureStore temperature;
 
   public ParkingService(
     JdbcTemplate db,
     ApplicationEventPublisher publisher,
+    TemperatureStore temperature,
     @Value("${parking.stale-after-seconds}") int staleSeconds
   ) {
     if (staleSeconds < 1) throw new IllegalArgumentException(
       "Device timeout must be positive"
     );
+    this.temperature = temperature;
     this.db = db;
     this.publisher = publisher;
     this.staleSeconds = staleSeconds;
@@ -112,6 +115,21 @@ public class ParkingService {
     return publish();
   }
 
+  @Transactional
+  public Snapshot temperatureReport(TemperatureData.Report report) {
+    if (
+      !"esp8266-01".equals(report.deviceId())
+    ) throw new ResponseStatusException(
+      HttpStatus.BAD_REQUEST,
+      "Unknown device"
+    );
+    lockDevice();
+    Instant now = Instant.now();
+    temperature.receive(report, now, staleSeconds);
+    touch(now);
+    return publish();
+  }
+
   private void touch(Instant now) {
     db.update(
       "UPDATE device SET online=true,last_seen_at=?,revision=revision+1 WHERE id='esp8266-01'",
@@ -164,7 +182,8 @@ public class ParkingService {
       threshold
     );
     for (String id : stale) updateSpace(id, Status.UNKNOWN, now, "TIMEOUT");
-    if (changed > 0 || !stale.isEmpty()) {
+    boolean temperatureExpired = temperature.expire(now, staleSeconds);
+    if (changed > 0 || !stale.isEmpty() || temperatureExpired) {
       db.update("UPDATE device SET revision=revision+1 WHERE id='esp8266-01'");
       publish();
     }
@@ -217,7 +236,8 @@ public class ParkingService {
       device,
       spaces,
       stats,
-      history(100)
+      history(100),
+      temperature.snapshot()
     );
   }
 

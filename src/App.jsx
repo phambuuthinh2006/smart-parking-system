@@ -23,6 +23,7 @@ import {
 import { useDeviceParking } from "./hooks/useDeviceParking";
 import { useParking } from "./hooks/useParking";
 import ParkingMap from "./components/ParkingMap";
+import FireAlarmPanel from "./components/FireAlarmPanel";
 import ActivityHistory, { formatTime } from "./components/ActivityHistory";
 import { STATUSES } from "./services/parking";
 
@@ -234,6 +235,12 @@ export default function App() {
           </motion.div>
           <ActivityHistory events={parking.events} />
         </div>
+        <FireAlarmPanel
+          key={mode}
+          simulation={!isDevice}
+          telemetry={device.temperature}
+          backendReachable={device.backendReachable}
+        />
         {isDevice ? (
           <section
             className="panel device-panel"

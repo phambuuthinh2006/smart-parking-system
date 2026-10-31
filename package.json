@@ -16,7 +16,8 @@
     "device:simulate": "node --env-file=.env scripts/simulate-device.mjs",
     "test:backend": "node --env-file=.env scripts/test-backend.mjs",
     "backend:build": "cd backend && ./mvnw package -DskipTests",
-    "backend:local": "node --env-file=.env scripts/run-backend.mjs"
+    "backend:local": "node --env-file=.env scripts/run-backend.mjs",
+    "temperature:simulate": "node --env-file=.env scripts/simulate-temperature.mjs"
   },
   "dependencies": {
     "@stomp/stompjs": "^7.5.0",

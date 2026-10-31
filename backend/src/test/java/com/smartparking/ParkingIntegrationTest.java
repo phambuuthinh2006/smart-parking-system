@@ -63,7 +63,12 @@ class ParkingIntegrationTest {
 
   @BeforeEach
   void reset() {
-    db.execute("TRUNCATE parking_event RESTART IDENTITY");
+    db.execute(
+      "TRUNCATE parking_event, temperature_reading, fire_alarm_event RESTART IDENTITY"
+    );
+    db.update(
+      "UPDATE temperature_sensor SET value_celsius=NULL,threshold_celsius=50,clear_threshold_celsius=45,blink_interval_ms=300,fire_opens_gate=true,alarm_active=false,status='UNKNOWN',last_reported_at=NULL,last_observed_at=NULL"
+    );
     db.update(
       "UPDATE parking_space SET status='UNKNOWN',last_reported_at=NULL"
     );
@@ -251,6 +256,301 @@ class ParkingIntegrationTest {
   }
 
   @Test
+  void temperaturePersistsAllReadingsButOnlyStateTransitions() {
+    assertThat(service.snapshot().temperature().status()).isEqualTo(
+      TemperatureData.Status.UNKNOWN
+    );
+    var normal = post(
+      "temperature",
+      Map.of("deviceId", "esp8266-01", "temperatureCelsius", 49),
+      KEY
+    );
+    assertThat(normal.getStatusCode().value()).isEqualTo(200);
+    assertThat(normal.getBody().temperature().status()).isEqualTo(
+      TemperatureData.Status.NORMAL
+    );
+    var alarm = post(
+      "temperature",
+      Map.of("deviceId", "esp8266-01", "temperatureCelsius", 50),
+      KEY
+    );
+    assertThat(alarm.getBody().temperature().status()).isEqualTo(
+      TemperatureData.Status.ALARM
+    );
+    post(
+      "temperature",
+      Map.of("deviceId", "esp8266-01", "temperatureCelsius", 90),
+      KEY
+    );
+    assertThat(
+      db.queryForObject(
+        "SELECT count(*) FROM temperature_reading",
+        Integer.class
+      )
+    ).isEqualTo(3);
+    assertThat(
+      db.queryForObject("SELECT count(*) FROM fire_alarm_event", Integer.class)
+    ).isEqualTo(2);
+    var clear = post(
+      "temperature",
+      Map.of("deviceId", "esp8266-01", "temperatureCelsius", 45),
+      KEY
+    );
+    assertThat(clear.getBody().temperature().status()).isEqualTo(
+      TemperatureData.Status.NORMAL
+    );
+    assertThat(
+      clear.getBody().temperature().events().get(0).previousStatus()
+    ).isEqualTo(TemperatureData.Status.ALARM);
+    assertThat(service.snapshot().stats().unknown()).isEqualTo(4);
+    assertThat(service.history(100)).isEmpty();
+  }
+
+  @Test
+  void firmwareHysteresisRetainsAlarmAndGateRequestAcrossTimeout() {
+    for (int value : new int[] { 49, 50, 47 })
+      post(
+        "temperature",
+        Map.of("deviceId", "esp8266-01", "temperatureCelsius", value),
+        KEY
+      );
+    var active = service.snapshot().temperature();
+    assertThat(active.status()).isEqualTo(TemperatureData.Status.ALARM);
+    assertThat(active.alarmActive()).isTrue();
+    assertThat(active.gateOpenRequested()).isTrue();
+    assertThat(active.blinkIntervalMs()).isEqualTo(300);
+    db.update(
+      "UPDATE temperature_sensor SET last_reported_at=now()-interval '60 seconds'"
+    );
+    service.expire();
+    var lost = service.snapshot().temperature();
+    assertThat(lost.status()).isEqualTo(TemperatureData.Status.UNKNOWN);
+    assertThat(lost.alarmActive()).isTrue();
+    assertThat(lost.gateOpenRequested()).isTrue();
+    assertThat(lost.events().get(0).gateOpenRequested()).isTrue();
+    var held = post(
+      "temperature",
+      Map.of("deviceId", "esp8266-01", "temperatureCelsius", 47),
+      KEY
+    )
+      .getBody()
+      .temperature();
+    assertThat(held.status()).isEqualTo(TemperatureData.Status.ALARM);
+    var clear = post(
+      "temperature",
+      Map.of("deviceId", "esp8266-01", "temperatureCelsius", 45),
+      KEY
+    )
+      .getBody()
+      .temperature();
+    assertThat(clear.status()).isEqualTo(TemperatureData.Status.NORMAL);
+    assertThat(clear.alarmActive()).isFalse();
+    assertThat(clear.gateOpenRequested()).isFalse();
+    var cold = post(
+      "temperature",
+      Map.of("deviceId", "esp8266-01", "temperatureCelsius", 47),
+      KEY
+    )
+      .getBody()
+      .temperature();
+    assertThat(cold.status()).isEqualTo(TemperatureData.Status.NORMAL);
+  }
+
+  @Test
+  void temperatureRejectsUnauthorizedMalformedAndOutOfRangeReportsAtomically() {
+    assertThat(
+      post(
+        "temperature",
+        Map.of("deviceId", "esp8266-01", "temperatureCelsius", 85),
+        null
+      )
+        .getStatusCode()
+        .value()
+    ).isEqualTo(401);
+    for (Object bad : List.of(-41, 151, 80.001, "NaN")) {
+      assertThat(
+        post(
+          "temperature",
+          Map.of("deviceId", "esp8266-01", "temperatureCelsius", bad),
+          KEY
+        )
+          .getStatusCode()
+          .value()
+      ).isEqualTo(400);
+    }
+    assertThat(
+      post(
+        "temperature",
+        Map.of("deviceId", "other", "temperatureCelsius", 85),
+        KEY
+      )
+        .getStatusCode()
+        .value()
+    ).isEqualTo(400);
+    assertThat(
+      post(
+        "temperature",
+        Map.of(
+          "deviceId",
+          "esp8266-01",
+          "temperatureCelsius",
+          85,
+          "thresholdCelsius",
+          100
+        ),
+        KEY
+      )
+        .getStatusCode()
+        .value()
+    ).isEqualTo(400);
+    assertThat(
+      db.queryForObject(
+        "SELECT count(*) FROM temperature_reading",
+        Integer.class
+      )
+    ).isZero();
+    assertThat(
+      db.queryForObject("SELECT count(*) FROM fire_alarm_event", Integer.class)
+    ).isZero();
+    assertThat(service.snapshot().revision()).isZero();
+  }
+
+  @Test
+  void temperatureExpiresIndependentlyAndNeverClaimsLostAlarmWasCleared() {
+    post("status", report(Status.OCCUPIED), KEY);
+    post(
+      "temperature",
+      Map.of("deviceId", "esp8266-01", "temperatureCelsius", 90),
+      KEY
+    );
+    db.update(
+      "UPDATE temperature_sensor SET last_reported_at=now()-interval '60 seconds'"
+    );
+    post("heartbeat", new Heartbeat("esp8266-01"), KEY);
+    service.expire();
+    var expired = service.snapshot();
+    assertThat(expired.device().online()).isTrue();
+    assertThat(expired.stats().occupied()).isEqualTo(1);
+    assertThat(expired.temperature().status()).isEqualTo(
+      TemperatureData.Status.UNKNOWN
+    );
+    assertThat(expired.temperature().temperatureCelsius()).isNull();
+    var event = expired.temperature().events().get(0);
+    assertThat(event.previousStatus()).isEqualTo(TemperatureData.Status.ALARM);
+    assertThat(event.status()).isEqualTo(TemperatureData.Status.UNKNOWN);
+    assertThat(event.source()).isEqualTo("TIMEOUT");
+    service.expire();
+    assertThat(service.snapshot().temperature().events()).hasSize(2);
+    post("heartbeat", new Heartbeat("esp8266-01"), KEY);
+    assertThat(service.snapshot().temperature().status()).isEqualTo(
+      TemperatureData.Status.UNKNOWN
+    );
+    assertThat(
+      post(
+        "temperature",
+        Map.of("deviceId", "esp8266-01", "temperatureCelsius", 27),
+        KEY
+      )
+        .getBody()
+        .temperature()
+        .status()
+    ).isEqualTo(TemperatureData.Status.NORMAL);
+  }
+
+  @Test
+  void temperatureObservedAtRejectsReplayWithoutSharingParkingTimestamp() {
+    Instant at = Instant.now().minusSeconds(1);
+    var temperature = new TemperatureData.Report(
+      "esp8266-01",
+      new java.math.BigDecimal("85"),
+      at
+    );
+    assertThat(
+      post("temperature", temperature, KEY).getStatusCode().value()
+    ).isEqualTo(200);
+    assertThat(
+      post("temperature", temperature, KEY).getStatusCode().value()
+    ).isEqualTo(409);
+    var old = new TemperatureData.Report(
+      "esp8266-01",
+      new java.math.BigDecimal("85"),
+      at.minusSeconds(60)
+    );
+    assertThat(post("temperature", old, KEY).getStatusCode().value()).isEqualTo(
+      400
+    );
+    assertThat(
+      post(
+        "status",
+        new Report(
+          "esp8266-01",
+          List.of(new Reading("P01", Status.OCCUPIED)),
+          at
+        ),
+        KEY
+      )
+        .getStatusCode()
+        .value()
+    ).isEqualTo(200);
+    assertThat(
+      db.queryForObject(
+        "SELECT count(*) FROM temperature_reading",
+        Integer.class
+      )
+    ).isEqualTo(1);
+  }
+
+  @Test
+  void concurrentTemperatureReportsPreserveReadingsWithoutDuplicatingActivation()
+    throws Exception {
+    try (var pool = new Pool(Executors.newFixedThreadPool(4))) {
+      var tasks = new ArrayList<Future<?>>();
+      for (int i = 0; i < 12; i++) tasks.add(
+        pool.executor.submit(() -> {
+          assertThat(
+            post(
+              "temperature",
+              Map.of("deviceId", "esp8266-01", "temperatureCelsius", 85),
+              KEY
+            )
+              .getStatusCode()
+              .value()
+          ).isEqualTo(200);
+        })
+      );
+      for (var task : tasks) task.get(10, TimeUnit.SECONDS);
+    }
+    assertThat(
+      db.queryForObject(
+        "SELECT count(*) FROM temperature_reading",
+        Integer.class
+      )
+    ).isEqualTo(12);
+    assertThat(
+      db.queryForObject("SELECT count(*) FROM fire_alarm_event", Integer.class)
+    ).isEqualTo(1);
+    assertThat(service.snapshot().revision()).isEqualTo(12);
+    assertThat(
+      http
+        .getForEntity("/api/temperature/readings?limit=101", String.class)
+        .getStatusCode()
+        .value()
+    ).isEqualTo(400);
+    assertThat(
+      http
+        .getForEntity("/api/temperature/events?limit=0", String.class)
+        .getStatusCode()
+        .value()
+    ).isEqualTo(400);
+    assertThat(
+      http
+        .getForEntity("/api/temperature/status", String.class)
+        .getStatusCode()
+        .value()
+    ).isEqualTo(200);
+  }
+
+  @Test
   void historyLimitIsValidated() {
     assertThat(
       http
@@ -330,6 +630,17 @@ class ParkingIntegrationTest {
       assertThat(received).isNotNull();
       assertThat(received.revision()).isEqualTo(service.snapshot().revision());
       assertThat(received.events()).hasSize(1);
+      post(
+        "temperature",
+        Map.of("deviceId", "esp8266-01", "temperatureCelsius", 81),
+        KEY
+      );
+      received = queue.poll(5, TimeUnit.SECONDS);
+      assertThat(received).isNotNull();
+      assertThat(received.temperature().status()).isEqualTo(
+        TemperatureData.Status.ALARM
+      );
+      assertThat(received.temperature().events()).hasSize(1);
       session.send("/topic/parking", Map.of("revision", 999));
       error.get(5, TimeUnit.SECONDS);
       assertThat(service.snapshot().revision()).isEqualTo(received.revision());

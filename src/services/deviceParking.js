@@ -1,4 +1,8 @@
 import { SPACE_IDS, STATUSES, statistics } from "./parking.js";
+import {
+  parseDeviceTemperature,
+  unknownTemperature,
+} from "./deviceTemperature.js";
 
 export function emptyDeviceState() {
   const spaces = SPACE_IDS.map((id) => ({
@@ -7,6 +11,7 @@ export function emptyDeviceState() {
     updatedAt: null,
   }));
   return {
+    temperature: unknownTemperature(),
     revision: -1,
     spaces,
     events: [],
@@ -79,6 +84,7 @@ export function parseSnapshot(data) {
     lastSeenAt: timestamp(data.device.lastSeenAt, true),
   };
   return {
+    temperature: parseDeviceTemperature(data.temperature),
     revision: data.revision,
     generatedAt: timestamp(data.generatedAt),
     staleAfterSeconds: data.staleAfterSeconds,
@@ -105,8 +111,14 @@ export function visibleDeviceState(snapshot, receivedAt, now) {
     status:
       !backendReachable || stale(space.updatedAt) ? "unknown" : space.status,
   }));
+  const sensor = snapshot.temperature || unknownTemperature();
+  const temperature =
+    !backendReachable || stale(sensor.updatedAt)
+      ? { ...sensor, status: "unknown", temperature: null }
+      : sensor;
   return {
     ...snapshot,
+    temperature,
     spaces,
     stats: statistics(spaces),
     backendReachable,

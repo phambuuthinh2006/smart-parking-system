@@ -57,6 +57,20 @@ Lệnh mở Vite + Cloudflare Quick Tunnel, in URL HTTPS tạm thời; Ctrl+C d�
 
 Vite bind loopback khi share, giữ kiểm tra Host, tự chọn cổng khác nếu 5173 bận. Nếu dùng cổng khác, thêm origin đó vào `ALLOWED_ORIGINS` để WebSocket được chấp nhận. Chi tiết frontend triển khai Vercel: backend Spring Boot/PostgreSQL cần host riêng có HTTPS/WSS; Vercel chỉ chạy bản frontend này.
 
+## Nhiệt độ / báo cháy theo cấu hình mạch
+
+**ON 50°C / OFF 45°C**, giữ trạng thái trong khoảng hai ngưỡng; LED đổi trạng thái mỗi **300 ms**. `FIRE_OPENS_GATE=true` được hiển thị dưới dạng yêu cầu mở cổng trong **Gate preview**, không xác nhận vị trí cổng hoặc điều khiển servo thật.
+
+Simulation cho phép chỉnh nhiệt độ/ngưỡng và bật còi web. Device nhận bản đo qua HTTP, lưu PostgreSQL, giữ alarm latch qua timeout/restart và cập nhật realtime. V2/V3 thêm các bảng nhiệt và chính sách firmware, giữ nguyên dữ liệu parking.
+
+```sh
+npm run temperature:simulate
+# Chu kỳ 27 → 49 → 50 → 47 → 45°C; hoặc gửi một bản đo:
+npm run temperature:simulate -- --temperature 50 --once
+```
+
+Lệnh gửi HTTP giả lập, chưa phải cảm biến thật. Xem [hướng dẫn demo, API và SQL](docs/FIRE_ALARM.md).
+
 ## Cấu trúc
 
 - `backend/`: REST, JDBC transactions, Flyway migrations, STOMP, integration tests.

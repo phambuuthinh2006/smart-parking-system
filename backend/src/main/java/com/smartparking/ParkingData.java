@@ -52,7 +52,8 @@ public final class ParkingData {
     Device device,
     List<Space> spaces,
     Stats stats,
-    List<Event> events
+    List<Event> events,
+    TemperatureData.State temperature
   ) {}
 
   public record Changed(Snapshot snapshot) {}

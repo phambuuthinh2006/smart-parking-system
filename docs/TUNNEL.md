@@ -1,3 +1,17 @@
+# Tunnel backend cho demo Vercel
+
+## Phiên 31/10/2026 — cấu hình nhiệt/cháy 50/45°C
+
+URL backend đang được dùng trong phiên deploy này:
+
+https://websites-cognitive-borough-invest.trycloudflare.com
+
+Production VITE_BACKEND_URL đã được cập nhật qua Vercel. API nhiệt độ đã xác minh HTTP200 và đúng CORS của domain frontend. Cần giữ máy, Docker và process tunnel chạy trong lúc demo. URL này thay đổi nếu mở Quick Tunnel mới.
+
+Các hướng dẫn/URL bên dưới thuộc phiên cũ ngày 22/10, dùng để tham khảo quy trình; không dùng hostname cũ thay URL phiên hiện tại.
+
+---
+
 # Backend tunnel để test Vercel
 
 Phiên mở ngày 2026-10-22. URL tạm thời, chỉ hoạt động khi máy và process cloudflared còn chạy:
