@@ -17,6 +17,7 @@ spring:
     deserialization:
       fail-on-unknown-properties: true
 parking:
+  access-simulation-enabled: ${ACCESS_SIMULATION_ENABLED:false}
   device-key: ${DEVICE_API_KEY}
   stale-after-seconds: ${DEVICE_TIMEOUT_SECONDS:45}
   expiry-check-ms: ${EXPIRY_CHECK_MS:5000}

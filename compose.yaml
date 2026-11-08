@@ -23,6 +23,7 @@ services:
       POSTGRES_USER: parking
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       DEVICE_API_KEY: ${DEVICE_API_KEY:?Run npm run backend:init first}
+      ACCESS_SIMULATION_ENABLED: ${ACCESS_SIMULATION_ENABLED:-false}
       DEVICE_TIMEOUT_SECONDS: ${DEVICE_TIMEOUT_SECONDS:-45}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173}
     ports:

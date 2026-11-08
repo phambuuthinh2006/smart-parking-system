@@ -28,6 +28,7 @@ import org.springframework.web.socket.messaging.WebSocketStompClient;
     "parking.device-key=test-only-device-key-1234567890",
     "parking.expiry-check-ms=3600000",
     "parking.stale-after-seconds=45",
+    "parking.access-simulation-enabled=true",
   }
 )
 @EnabledIfEnvironmentVariable(named = "TEST_DATABASE_URL", matches = ".+")
@@ -63,6 +64,14 @@ class ParkingIntegrationTest {
 
   @BeforeEach
   void reset() {
+    db.execute("TRUNCATE registered_plate");
+    db.update("UPDATE camera_latest SET event_id=NULL,plate_text=NULL,plate=NULL,outcome=NULL,received_at=NULL WHERE id=1");
+    for (String plate : List.of("43A12345", "43A99999", "43A12340", "43A12341", "43A12342", "43A12343"))
+      db.update("INSERT INTO registered_plate(plate) VALUES(?)", plate);
+    db.execute(
+      "TRUNCATE vehicle_access_event, vehicle_visit, virtual_barrier RESTART IDENTITY"
+    );
+    db.update("INSERT INTO virtual_barrier(id) VALUES(1)");
     db.execute(
       "TRUNCATE parking_event, temperature_reading, fire_alarm_event RESTART IDENTITY"
     );
@@ -550,6 +559,268 @@ class ParkingIntegrationTest {
     ).isEqualTo(200);
   }
 
+  private ResponseEntity<AccessData.Result> accessPost(
+    String path,
+    Object body,
+    boolean authenticated
+  ) {
+    var headers = new HttpHeaders();
+    headers.setContentType(MediaType.APPLICATION_JSON);
+    if (authenticated) headers.set("X-Device-Key", KEY);
+    var response = http.postForEntity(
+      path,
+      new HttpEntity<>(body, headers),
+      String.class
+    );
+    AccessData.Result result = null;
+    if (response.getStatusCode().is2xxSuccessful()) try {
+      result = mapper.readValue(response.getBody(), AccessData.Result.class);
+    } catch (Exception error) {
+      throw new AssertionError(error);
+    }
+    return new ResponseEntity<>(result, response.getStatusCode());
+  }
+
+  private AccessData.Detection detection(
+    String plate,
+    AccessData.Direction direction
+  ) {
+    return new AccessData.Detection(
+      UUID.randomUUID(),
+      plate,
+      direction,
+      new java.math.BigDecimal("0.95"),
+      "entry-camera",
+      null
+    );
+  }
+
+  private AccessData.Result detect(AccessData.Detection detection) {
+    var response = accessPost(
+      "/api/device/vehicle-detections",
+      detection,
+      true
+    );
+    assertThat(response.getStatusCode().value()).isEqualTo(200);
+    return response.getBody();
+  }
+
+  private AccessData.Result passage(long version) {
+    var response = accessPost(
+      "/api/access/simulation/barrier",
+      new AccessData.Command(
+        UUID.randomUUID(),
+        AccessData.Action.PASSAGE,
+        version
+      ),
+      false
+    );
+    assertThat(response.getStatusCode().value()).isEqualTo(200);
+    return response.getBody();
+  }
+
+  @Test
+  void vehicleEntryAndExitRequirePassageBeforeTimestampsAreConfirmed() {
+    var entry = detect(detection("43A-123.45", AccessData.Direction.ENTRY));
+    assertThat(entry.outcome()).isEqualTo("ENTRY_PENDING");
+    assertThat(entry.snapshot().access().barrier().position()).isEqualTo(
+      "OPEN"
+    );
+    assertThat(entry.snapshot().access().visits().get(0).entryAt()).isNull();
+    assertThat(entry.snapshot().device().online()).isFalse();
+    var inside = passage(entry.snapshot().access().barrier().version());
+    assertThat(inside.snapshot().access().visits().get(0).status()).isEqualTo(
+      "INSIDE"
+    );
+    assertThat(
+      inside.snapshot().access().visits().get(0).entryAt()
+    ).isNotNull();
+    var exit = detect(detection("43A12345", AccessData.Direction.EXIT));
+    assertThat(exit.outcome()).isEqualTo("EXIT_PENDING");
+    assertThat(exit.snapshot().access().stats().inside()).isEqualTo(1);
+    assertThat(exit.snapshot().access().visits().get(0).exitAt()).isNull();
+    var finished = passage(exit.snapshot().access().barrier().version());
+    assertThat(finished.snapshot().access().visits().get(0).status()).isEqualTo(
+      "EXITED"
+    );
+    assertThat(
+      finished.snapshot().access().visits().get(0).exitAt()
+    ).isNotNull();
+    assertThat(finished.snapshot().access().barrier().position()).isEqualTo(
+      "CLOSED"
+    );
+  }
+
+  @Test
+  void cameraRequiresKeyAndValidPlateConfidence() {
+    assertThat(
+      accessPost(
+        "/api/device/vehicle-detections",
+        detection("43A12345", AccessData.Direction.ENTRY),
+        false
+      )
+        .getStatusCode()
+        .value()
+    ).isEqualTo(401);
+    assertThat(
+      accessPost(
+        "/api/device/vehicle-detections",
+        detection("garbage", AccessData.Direction.ENTRY),
+        true
+      )
+        .getStatusCode()
+        .value()
+    ).isEqualTo(400);
+    var low = new AccessData.Detection(
+      UUID.randomUUID(),
+      "43A12345",
+      AccessData.Direction.ENTRY,
+      new java.math.BigDecimal("0.74"),
+      "camera",
+      null
+    );
+    assertThat(
+      accessPost("/api/device/vehicle-detections", low, true)
+        .getStatusCode()
+        .value()
+    ).isEqualTo(400);
+    assertThat(service.snapshot().access().visits()).isEmpty();
+    assertThatThrownBy(() ->
+      new AccessStore(db, false).requireSimulation()
+    ).isInstanceOf(
+      org.springframework.web.server.ResponseStatusException.class
+    );
+  }
+
+  @Test
+  void detectionIdempotencySurvivesPassageAndRejectsChangedPayload() {
+    var packet = detection("43A12345", AccessData.Direction.ENTRY);
+    var first = detect(packet);
+    var duplicate = detect(packet);
+    assertThat(duplicate.duplicate()).isTrue();
+    assertThat(duplicate.snapshot().revision()).isEqualTo(
+      first.snapshot().revision()
+    );
+    passage(first.snapshot().access().barrier().version());
+    var replay = detect(packet);
+    assertThat(replay.snapshot().access().barrier().position()).isEqualTo(
+      "CLOSED"
+    );
+    assertThat(replay.snapshot().access().visits()).hasSize(1);
+    var changed = new AccessData.Detection(
+      packet.eventId(),
+      "43A99999",
+      packet.direction(),
+      packet.confidence(),
+      packet.cameraId(),
+      null
+    );
+    assertThat(
+      accessPost("/api/device/vehicle-detections", changed, true)
+        .getStatusCode()
+        .value()
+    ).isEqualTo(409);
+    assertThat(
+      detect(detection("43A12345", AccessData.Direction.ENTRY)).outcome()
+    ).isEqualTo("ALREADY_INSIDE");
+  }
+
+  @Test
+  void virtualBarrierBusyCancelAndVersionGuardsPreserveVisitState() {
+    var first = detect(detection("43A12345", AccessData.Direction.ENTRY));
+    assertThat(
+      detect(detection("43A99999", AccessData.Direction.ENTRY)).outcome()
+    ).isEqualTo("BARRIER_BUSY");
+    assertThat(
+      accessPost(
+        "/api/access/simulation/barrier",
+        new AccessData.Command(UUID.randomUUID(), AccessData.Action.CLOSE, 0L),
+        false
+      )
+        .getStatusCode()
+        .value()
+    ).isEqualTo(409);
+    var close = accessPost(
+      "/api/access/simulation/barrier",
+      new AccessData.Command(
+        UUID.randomUUID(),
+        AccessData.Action.CLOSE,
+        first.snapshot().access().barrier().version()
+      ),
+      false
+    ).getBody();
+    assertThat(close.snapshot().access().visits().get(0).status()).isEqualTo(
+      "CANCELLED"
+    );
+    assertThat(close.snapshot().access().visits().get(0).entryAt()).isNull();
+    assertThat(
+      detect(detection("43A12345", AccessData.Direction.EXIT)).outcome()
+    ).isEqualTo("NOT_INSIDE");
+  }
+
+  @Test
+  void accessLedgerCapacityCountsPendingEntryWithoutInventingParkingSlot() {
+    for (int i = 0; i < 4; i++) {
+      var entry = detect(detection("43A1234" + i, AccessData.Direction.ENTRY));
+      passage(entry.snapshot().access().barrier().version());
+    }
+    assertThat(
+      detect(detection("43A99999", AccessData.Direction.ENTRY)).outcome()
+    ).isEqualTo("CAPACITY_REACHED");
+    assertThat(service.snapshot().access().stats().inside()).isEqualTo(4);
+    assertThat(service.snapshot().stats().unknown()).isEqualTo(4);
+  }
+
+  @Test
+  void fireOverrideHoldsVirtualBarrierOpenWithoutCreatingFalseVisits() {
+    post(
+      "temperature",
+      Map.of("deviceId", "esp8266-01", "temperatureCelsius", 50),
+      KEY
+    );
+    assertThat(service.snapshot().access().barrier().fireOverride()).isTrue();
+    assertThat(service.snapshot().access().barrier().position()).isEqualTo(
+      "OPEN"
+    );
+    assertThat(
+      accessPost(
+        "/api/access/simulation/barrier",
+        new AccessData.Command(UUID.randomUUID(), AccessData.Action.CLOSE, 0L),
+        false
+      )
+        .getStatusCode()
+        .value()
+    ).isEqualTo(409);
+    assertThat(
+      detect(detection("43A12345", AccessData.Direction.ENTRY)).outcome()
+    ).isEqualTo("FIRE_OVERRIDE");
+    assertThat(service.snapshot().access().visits()).isEmpty();
+    post(
+      "temperature",
+      Map.of("deviceId", "esp8266-01", "temperatureCelsius", 45),
+      KEY
+    );
+    assertThat(service.snapshot().access().barrier().position()).isEqualTo(
+      "CLOSED"
+    );
+  }
+
+  @Test
+  void concurrentCameraRetriesCreateOneVisitAndOneEvent() throws Exception {
+    var packet = detection("43A12345", AccessData.Direction.ENTRY);
+    try (var pool = new Pool(Executors.newFixedThreadPool(4))) {
+      var tasks = new ArrayList<Future<?>>();
+      for (int i = 0; i < 10; i++) tasks.add(
+        pool.executor.submit(() -> detect(packet))
+      );
+      for (var task : tasks) task.get(10, TimeUnit.SECONDS);
+    }
+    var state = service.snapshot().access();
+    assertThat(state.visits()).hasSize(1);
+    assertThat(state.events()).hasSize(1);
+    assertThat(state.barrier().version()).isEqualTo(1);
+  }
+
   @Test
   void historyLimitIsValidated() {
     assertThat(
@@ -649,5 +920,40 @@ class ParkingIntegrationTest {
       client.stop();
       scheduler.shutdown();
     }
+  }
+
+  @Test
+  void projectCameraChecksRegistrationWithoutInventingConfidence() {
+    db.update("DELETE FROM registered_plate WHERE plate='43A12345'");
+    var headers = new HttpHeaders();
+    headers.setContentType(MediaType.APPLICATION_JSON);
+    var denied = new CameraController.Reading(UUID.randomUUID(), "43A-123.45", AccessData.Direction.ENTRY, null);
+    assertThat(http.postForEntity("/api/device/plate-readings", denied, String.class).getStatusCode().value()).isEqualTo(401);
+    headers.set("X-Device-Key", KEY);
+    var first = http.postForEntity("/api/device/plate-readings", new HttpEntity<>(denied, headers), CameraController.Latest.class);
+    assertThat(first.getBody().outcome()).isEqualTo("NOT_REGISTERED");
+    assertThat(service.snapshot().access().barrier().position()).isEqualTo("CLOSED");
+    assertThat(service.snapshot().access().visits()).isEmpty();
+    var registration = http.postForEntity("/api/device/registered-plates", new HttpEntity<>(new CameraController.Registration("43A-123.45", true), headers), String.class);
+    assertThat(registration.getStatusCode().value()).isEqualTo(200);
+    var allowed = new CameraController.Reading(UUID.randomUUID(), "43A-123.45", AccessData.Direction.ENTRY, null);
+    var result = http.postForEntity("/api/device/plate-readings", new HttpEntity<>(allowed, headers), CameraController.Latest.class);
+    assertThat(result.getBody().outcome()).isEqualTo("ENTRY_PENDING");
+    assertThat(service.snapshot().access().barrier().position()).isEqualTo("OPEN");
+    assertThat(service.snapshot().access().events().get(0).confidence()).isNull();
+    assertThat(service.snapshot().access().visits().get(0).entryAt()).isNull();
+    assertThat(http.postForEntity("/api/device/plate-readings", new HttpEntity<>(allowed, headers), CameraController.Latest.class).getStatusCode().value()).isEqualTo(200);
+    assertThat(service.snapshot().access().visits()).hasSize(1);
+    var invalid = new CameraController.Reading(UUID.randomUUID(), "OCR ?", AccessData.Direction.ENTRY, null);
+    assertThat(http.postForEntity("/api/device/plate-readings", new HttpEntity<>(invalid, headers), CameraController.Latest.class).getBody().outcome()).isEqualTo("INVALID_PLATE");
+    assertThat(service.snapshot().access().visits()).hasSize(1);
+    var latest = http.getForObject("/api/camera/latest", CameraController.Latest.class);
+    assertThat(latest.plateText()).isEqualTo("OCR ?");
+    passage(service.snapshot().access().barrier().version());
+    assertThat(service.snapshot().access().barrier().position()).isEqualTo("CLOSED");
+    assertThat(service.snapshot().access().visits().get(0).entryAt()).isNotNull();
+    // Revocation blocks subsequent camera detections too, including the older API.
+    http.postForEntity("/api/device/registered-plates", new HttpEntity<>(new CameraController.Registration("43A12345", false), headers), String.class);
+    assertThat(detect(detection("43A12345", AccessData.Direction.EXIT)).outcome()).isEqualTo("NOT_REGISTERED");
   }
 }

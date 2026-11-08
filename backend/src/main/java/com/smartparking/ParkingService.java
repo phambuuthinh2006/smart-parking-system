@@ -24,16 +24,19 @@ public class ParkingService {
   private final ApplicationEventPublisher publisher;
   private final int staleSeconds;
   private final TemperatureStore temperature;
+  private final AccessStore access;
 
   public ParkingService(
     JdbcTemplate db,
     ApplicationEventPublisher publisher,
     TemperatureStore temperature,
+    AccessStore access,
     @Value("${parking.stale-after-seconds}") int staleSeconds
   ) {
     if (staleSeconds < 1) throw new IllegalArgumentException(
       "Device timeout must be positive"
     );
+    this.access = access;
     this.temperature = temperature;
     this.db = db;
     this.publisher = publisher;
@@ -128,6 +131,77 @@ public class ParkingService {
     temperature.receive(report, now, staleSeconds);
     touch(now);
     return publish();
+  }
+
+  @Transactional
+  public CameraController.Registered registerPlate(CameraController.Registration registration) {
+    lockDevice();
+    String plate = AccessStore.normalizePlate(registration.plate());
+    db.update("INSERT INTO registered_plate(plate,enabled) VALUES (?,?) ON CONFLICT(plate) DO UPDATE SET enabled=EXCLUDED.enabled",
+      plate, registration.enabled());
+    return new CameraController.Registered(plate, registration.enabled());
+  }
+
+  @Transactional
+  public CameraController.Latest cameraReading(CameraController.Reading reading) {
+    lockDevice();
+    String raw = reading.plateText().trim();
+    String plate = null;
+    String outcome = "INVALID_PLATE";
+    Instant now = Instant.now();
+    if (reading.observedAt() != null && (reading.observedAt().isBefore(now.minusSeconds(60)) || reading.observedAt().isAfter(now.plusSeconds(30))))
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Reading outside freshness window");
+    try { plate = AccessStore.normalizePlate(raw); }
+    catch (ResponseStatusException invalid) { /* Display OCR text, but never open for invalid text. */ }
+    if (plate != null) {
+      // Raw OCR has no calibrated confidence. Store null instead of inventing one.
+      var applied = access.detect(new AccessData.Detection(reading.eventId(), plate, reading.direction(), null,
+        "project-camera", reading.observedAt()), "CAMERA", temperature.snapshot().gateOpenRequested(), now);
+      outcome = applied.outcome();
+      accessResult(applied);
+    }
+    db.update("UPDATE camera_latest SET event_id=?,plate_text=?,plate=?,outcome=?,received_at=? WHERE id=1",
+      reading.eventId(),raw,plate,outcome,java.sql.Timestamp.from(now));
+    return new CameraController.Latest(reading.eventId(),raw,plate,outcome,now);
+  }
+
+  @Transactional
+  public AccessData.Result vehicleDetection(
+    AccessData.Detection report,
+    String source
+  ) {
+    lockDevice();
+    var applied = access.detect(
+      report,
+      source,
+      temperature.snapshot().gateOpenRequested(),
+      Instant.now()
+    );
+    return accessResult(applied);
+  }
+
+  @Transactional
+  public AccessData.Result virtualBarrierCommand(AccessData.Command command) {
+    lockDevice();
+    var applied = access.command(
+      command,
+      temperature.snapshot().gateOpenRequested(),
+      Instant.now()
+    );
+    return accessResult(applied);
+  }
+
+  private AccessData.Result accessResult(AccessData.Applied applied) {
+    if (!applied.duplicate()) db.update(
+      "UPDATE device SET revision=revision+1 WHERE id='esp8266-01'"
+    );
+    Snapshot snapshot = applied.duplicate() ? readSnapshot() : publish();
+    return new AccessData.Result(
+      applied.outcome(),
+      applied.visitId(),
+      applied.duplicate(),
+      snapshot
+    );
   }
 
   private void touch(Instant now) {
@@ -229,6 +303,7 @@ public class ParkingService {
       count(spaces, Status.OCCUPIED),
       count(spaces, Status.UNKNOWN)
     );
+    var thermal = temperature.snapshot();
     return new Snapshot(
       revision,
       Instant.now(),
@@ -237,7 +312,8 @@ public class ParkingService {
       spaces,
       stats,
       history(100),
-      temperature.snapshot()
+      thermal,
+      access.snapshot(thermal.gateOpenRequested())
     );
   }
 

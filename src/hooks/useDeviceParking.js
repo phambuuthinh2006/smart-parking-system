@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Client } from "@stomp/stompjs";
 import {
   emptyDeviceState,
@@ -9,6 +9,8 @@ import {
 
 const base = (import.meta.env.VITE_BACKEND_URL || "").replace(/\/$/, "");
 export function useDeviceParking(enabled) {
+  const acceptRef = useRef(null);
+  const refreshRef = useRef(null);
   const [snapshot, setSnapshot] = useState(emptyDeviceState);
   const [receivedAt, setReceivedAt] = useState(null);
   const [transport, setTransport] = useState("Connecting");
@@ -77,17 +79,43 @@ export function useDeviceParking(enabled) {
         if (active) setTransport("Reconnecting");
       },
     });
+    acceptRef.current = accept;
+    refreshRef.current = refresh;
     client.activate();
     refresh();
     const poll = window.setInterval(refresh, 10000);
     const tick = window.setInterval(() => setNow(Date.now()), 1000);
     return () => {
       active = false;
+      acceptRef.current = null;
+      refreshRef.current = null;
       inFlight?.abort();
       clearInterval(poll);
       clearInterval(tick);
       void client.deactivate();
     };
   }, [enabled]);
-  return { ...visibleDeviceState(snapshot, receivedAt, now), transport };
+  async function simulateAccess(path, body) {
+    try {
+      const response = await fetch(`${base}/api/access/simulation/${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(8000),
+      });
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(result.message || `HTTP ${response.status}`);
+      acceptRef.current?.(result.snapshot);
+      return result;
+    } catch (error) {
+      void refreshRef.current?.();
+      throw error;
+    }
+  }
+  return {
+    ...visibleDeviceState(snapshot, receivedAt, now),
+    transport,
+    simulateAccess,
+  };
 }

@@ -23,18 +23,22 @@ import {
 import { useDeviceParking } from "./hooks/useDeviceParking";
 import { useParking } from "./hooks/useParking";
 import ParkingMap from "./components/ParkingMap";
+import VehicleAccessPanel from "./components/VehicleAccessPanel";
+import CameraPlatePanel from "./components/CameraPlatePanel";
 import FireAlarmPanel from "./components/FireAlarmPanel";
 import ActivityHistory, { formatTime } from "./components/ActivityHistory";
 import { STATUSES } from "./services/parking";
 
 export default function App() {
   const simulation = useParking();
+  const [simulationFireGate, setSimulationFireGate] = useState(false);
   const [mode, setMode] = useState("simulation");
   const device = useDeviceParking(mode === "device");
   const isDevice = mode === "device";
   const parking = isDevice ? device : simulation;
   function changeMode(next) {
     simulation.setRunning(false);
+    setSimulationFireGate(false);
     setMode(next);
   }
   const [selected, setSelected] = useState("P01");
@@ -235,9 +239,19 @@ export default function App() {
           </motion.div>
           <ActivityHistory events={parking.events} />
         </div>
+        <CameraPlatePanel />
+        <VehicleAccessPanel
+          key={`access-${mode}`}
+          simulation={!isDevice}
+          telemetry={device.access}
+          reachable={device.backendReachable}
+          fireOverride={simulationFireGate}
+          onServerAction={device.simulateAccess}
+        />
         <FireAlarmPanel
           key={mode}
           simulation={!isDevice}
+          onFireGateChange={setSimulationFireGate}
           telemetry={device.temperature}
           backendReachable={device.backendReachable}
         />

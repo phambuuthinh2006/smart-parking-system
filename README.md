@@ -2,6 +2,10 @@
 
 Dashboard React + Vite + Tailwind CSS với backend **Spring Boot 3.5 / Java 17**, **PostgreSQL 16** và **WebSocket/STOMP**. Prototype gồm bốn chỗ P01–P04, một thiết bị `esp8266-01`.
 
+ESP32 phát AP, laptop chạy camera/web và điều khiển servo qua cầu nối Python: xem [hướng dẫn ESP32](docs/ESP32_SETUP.md).
+
+Camera gốc trong `Project`, kiểm tra biển đăng ký và chuyển lệnh cho ESP32: [Project/Camera/run.md](Project/Camera/run.md).
+
 ## Chạy nhanh
 
 Cần Node.js **22.12+**, npm và Docker Compose. Docker sẽ build Java; không cần cài Maven/Java trên máy khi dùng cách này.

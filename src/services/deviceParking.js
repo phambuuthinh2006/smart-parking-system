@@ -1,3 +1,4 @@
+import { parseAccess, emptyAccess } from "./vehicleAccess.js";
 import { SPACE_IDS, STATUSES, statistics } from "./parking.js";
 import {
   parseDeviceTemperature,
@@ -11,6 +12,7 @@ export function emptyDeviceState() {
     updatedAt: null,
   }));
   return {
+    access: emptyAccess(),
     temperature: unknownTemperature(),
     revision: -1,
     spaces,
@@ -84,6 +86,7 @@ export function parseSnapshot(data) {
     lastSeenAt: timestamp(data.device.lastSeenAt, true),
   };
   return {
+    access: parseAccess(data.access),
     temperature: parseDeviceTemperature(data.temperature),
     revision: data.revision,
     generatedAt: timestamp(data.generatedAt),
@@ -118,6 +121,15 @@ export function visibleDeviceState(snapshot, receivedAt, now) {
       : sensor;
   return {
     ...snapshot,
+    access: backendReachable
+      ? snapshot.access || emptyAccess()
+      : {
+          ...(snapshot.access || emptyAccess()),
+          barrier: {
+            ...(snapshot.access || emptyAccess()).barrier,
+            position: "UNKNOWN",
+          },
+        },
     temperature,
     spaces,
     stats: statistics(spaces),

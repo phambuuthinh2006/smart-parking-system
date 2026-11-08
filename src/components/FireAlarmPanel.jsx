@@ -1,4 +1,4 @@
-import { useId, useReducer } from "react";
+import { useId, useReducer, useEffect } from "react";
 import {
   Flame,
   Thermometer,
@@ -28,6 +28,7 @@ import "./FireAlarmPanel.css";
 
 export default function FireAlarmPanel({
   simulation,
+  onFireGateChange,
   telemetry,
   backendReachable,
 }) {
@@ -41,6 +42,9 @@ export default function FireAlarmPanel({
     unknown = state.status === "unknown";
   const sound = useAlarmSound(alarm);
   const id = useId();
+  useEffect(() => {
+    if (simulation) onFireGateChange?.(state.gateOpenRequested);
+  }, [simulation, state.gateOpenRequested, onFireGateChange]);
   const renderEvent = (event) => (
     <li key={event.id}>
       <span className={`fire-event-dot ${event.status}`} />

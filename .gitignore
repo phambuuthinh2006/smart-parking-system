@@ -13,3 +13,14 @@ backend/target/
 # Local IDE metadata
 .idea/
 *.iml
+
+# Local camera models and Python environments
+__pycache__/
+.venv/
+demo/*.pt
+
+# Private ESP32 Wi-Fi and HTTP credentials
+SmartParking/Config.h
+
+# Original camera model stays local; copy best.pt separately when setting up camera.
+Project/Camera/*.pt
