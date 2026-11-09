@@ -5,6 +5,8 @@
 
 // ================= PIN CONFIGURATION =================
 
+
+
 // Cảm biến siêu âm 1: Kiểm tra chỗ đỗ xe (GIỮ NGUYÊN)
 #define TRIG_PIN 5
 #define ECHO_PIN 18
@@ -44,7 +46,12 @@ const float GATE_SENSOR_THRESHOLD = 15.0;
 const float TEMP_THRESHOLD = 45.0;
 
 // Ngưỡng ánh sáng
-const int LDR_THRESHOLD = 500;
+//const int LDR_THRESHOLD = 500;
+
+// Với dải ADC 12-bit (0 - 4095) của ESP32:
+const int LDR_ON  = 1200;   // Dưới 1200 (~30%): Trời tối -> BẬT ĐÈN
+const int LDR_OFF = 2200;   // Trên 2200 (~55%): Trời sáng rõ -> TẮT ĐÈN
+static bool lightOn = false;
 
 // Số lần đọc liên tiếp để xác nhận trạng thái (chống nhiễu)
 const int DETECT_CONFIRM_COUNT = 3;
@@ -125,21 +132,27 @@ float readGateDistance() {
 
 // Đọc nhiệt độ từ NTC
 float readTemperature() {
-  int adcValue = analogRead(NTC_PIN);
+  // int adcValue = analogRead(NTC_PIN);
 
-  if (adcValue <= 0 || adcValue >= 4095) {
-    return -100;
+  // if (adcValue <= 0 || adcValue >= 4095) {
+  //   return -100;
+  // }
+
+  // float resistance = R_FIXED * (4095.0 / adcValue - 1.0);
+  // float steinhart = resistance / R_NOMINAL;
+  // steinhart = log(steinhart);
+  // steinhart /= BETA;
+  // steinhart += 1.0 / TEMP_NOMINAL;
+  // steinhart = 1.0 / steinhart;
+
+  // float temperature = steinhart - 273.15;
+  // return temperature;
+  uint32_t sum = 0;
+  for (int i = 0; i < 16; i++) {
+    sum += analogReadMilliVolts(NTC_PIN);
+    delayMicroseconds(200);
   }
-
-  float resistance = R_FIXED * (4095.0 / adcValue - 1.0);
-  float steinhart = resistance / R_NOMINAL;
-  steinhart = log(steinhart);
-  steinhart /= BETA;
-  steinhart += 1.0 / TEMP_NOMINAL;
-  steinhart = 1.0 / steinhart;
-
-  float temperature = steinhart - 273.15;
-  return temperature;
+  return (sum / 16.0) / 10.0;   // 10mV/°C
 }
 
 
@@ -265,6 +278,9 @@ void handleGateLogic() {
 void setup() {
   Serial.begin(115200);
 
+  analogReadResolution(12);
+  analogSetPinAttenuation(NTC_PIN, ADC_0db);
+
   // Cấu hình cảm biến 1: Slot đỗ xe
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
@@ -328,12 +344,19 @@ void loop() {
     // --------------------------------
     // 4. KIỂM TRA ÁNH SÁNG
     // --------------------------------
+    // int ldrValue = analogRead(LDR_PIN);
+    // if (ldrValue < LDR_THRESHOLD) {
+    //   digitalWrite(LED_GATE, HIGH);
+    // } else {
+    //   digitalWrite(LED_GATE, LOW);
+    // }
     int ldrValue = analogRead(LDR_PIN);
-    if (ldrValue < LDR_THRESHOLD) {
-      digitalWrite(LED_GATE, HIGH);
-    } else {
-      digitalWrite(LED_GATE, LOW);
+    if (!lightOn && ldrValue < LDR_ON) {
+      lightOn = true;
+    } else if (lightOn && ldrValue > LDR_OFF) {
+      lightOn = false;
     }
+    digitalWrite(LED_GATE, lightOn ? HIGH : LOW);
 
     // --------------------------------
     // 5. KIỂM TRA NHIỆT ĐỘ
