@@ -1,4 +1,3 @@
-
 #include "WifiManager.h"
 
 #include <WiFi.h>
@@ -31,7 +30,7 @@ GateCommand pendingCommand = GATE_NONE;
 
 // ================= API HANDLERS =================
 
-// API mở cổng: POST /open
+// API mở cổng: POST /open (hoặc GET /open để test qua trình duyệt)
 void handleOpen() {
   pendingCommand = GATE_OPEN;
 
@@ -42,7 +41,7 @@ void handleOpen() {
   );
 }
 
-// API đóng cổng: POST /close
+// API đóng cổng: POST /close (hoặc GET /close)
 void handleClose() {
   pendingCommand = GATE_CLOSE;
 
@@ -55,7 +54,7 @@ void handleClose() {
 
 // API lấy trạng thái chỗ đỗ xe: GET /slot
 void handleSlot() {
-  String status = slotOccupied ? "OCCUPIED" : "EMPTY";
+  String status = slotOccupied ? "OCCUPIED" : "AVAILABLE";
 
   String json = "{";
   json += "\"slot_id\":1,";
@@ -66,16 +65,19 @@ void handleSlot() {
   server.send(200, "application/json", json);
 }
 
-// API lấy toàn bộ trạng thái: GET /status
+// API lấy toàn bộ trạng thái hệ thống: GET /status
 void handleStatus() {
   String gateStatus = gateOpen ? "OPEN" : "CLOSED";
-  String slotStatus = slotOccupied ? "OCCUPIED" : "EMPTY";
+  String slotStatus = slotOccupied ? "OCCUPIED" : "AVAILABLE";
+  bool isFire = (currentTemperature >= 45.0);
 
   String json = "{";
   json += "\"gate\":\"" + gateStatus + "\",";
   json += "\"slot\":\"" + slotStatus + "\",";
   json += "\"distance\":" + String(slotDistance, 2) + ",";
   json += "\"temperature\":" + String(currentTemperature, 2) + ",";
+  json += "\"temperatureValid\":true,";
+  json += "\"fireAlarm\":" + String(isFire ? "true" : "false") + ",";
   json += "\"light\":" + String(currentLightValue);
   json += "}";
 
@@ -87,42 +89,48 @@ void handleStatus() {
 
 void setupWiFi() {
   Serial.println();
-  Serial.println("Starting Wi-Fi Access Point...");
+  Serial.println("Khoi dong Wi-Fi Access Point ESP32...");
 
-  // Tạo mạng Wi-Fi do ESP32 phát
+  // Bật chế độ SoftAP, cho phép tối đa 8 thiết bị kết nối cùng lúc (Laptop 1, Laptop 2, điện thoại)
   WiFi.mode(WIFI_AP);
-  WiFi.softAP(AP_SSID, AP_PASSWORD);
+  WiFi.softAP(AP_SSID, AP_PASSWORD, 1, 0, 8);
 
-  // In địa chỉ IP
-  Serial.print("Wi-Fi SSID: ");
+  // In địa chỉ IP cố định của ESP32
+  Serial.print("Wi-Fi SSID : ");
   Serial.println(AP_SSID);
+  Serial.print("Mat khau   : ");
+  Serial.println(AP_PASSWORD);
+  Serial.print("ESP32 IP   : ");
+  Serial.println(WiFi.softAPIP()); // Luôn là 192.168.4.1
 
-  Serial.print("ESP32 IP: ");
-  Serial.println(WiFi.softAPIP());
+  // Bật CORS để hỗ trợ Web/Dashboard kết nối trực tiếp không bị chặn
+  server.enableCORS(true);
 
-  // Đăng ký các API
+  // Đăng ký các API Endpoint
   server.on("/open", HTTP_POST, handleOpen);
+  server.on("/open", HTTP_GET, handleOpen);
   server.on("/close", HTTP_POST, handleClose);
+  server.on("/close", HTTP_GET, handleClose);
   server.on("/slot", HTTP_GET, handleSlot);
   server.on("/status", HTTP_GET, handleStatus);
 
-  // Trang kiểm tra kết nối
+  // Trang kiểm tra kết nối qua trình duyệt
   server.on("/", HTTP_GET, []() {
     server.send(
       200,
       "text/plain",
-      "Smart Parking ESP32 is running!"
+      "Smart Parking ESP32 AP is READY at 192.168.4.1!"
     );
   });
 
   // Khởi động Web Server
   server.begin();
 
-  Serial.println("Web Server started!");
+  Serial.println("ESP32 Web Server da san sang nhan lenh!");
 }
 
 
-// Xử lý yêu cầu HTTP liên tục
+// Xử lý yêu cầu HTTP liên tục trong hàm loop
 void handleWiFi() {
   server.handleClient();
 }
@@ -148,4 +156,10 @@ void updateParkingStatus(bool occupied, float distance) {
 void updateSensorStatus(float temperature, int lightValue) {
   currentTemperature = temperature;
   currentLightValue = lightValue;
+}
+
+
+// Cập nhật trạng thái cổng (Mở / Đóng)
+void updateGateStatus(bool isOpen) {
+  gateOpen = isOpen;
 }

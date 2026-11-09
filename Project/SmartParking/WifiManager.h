@@ -26,4 +26,7 @@ void updateParkingStatus(bool occupied, float distance);
 // Cập nhật dữ liệu cảm biến
 void updateSensorStatus(float temperature, int lightValue);
 
+// Cập nhật trạng thái cổng (Mở / Đóng)
+void updateGateStatus(bool isOpen);
+
 #endif
