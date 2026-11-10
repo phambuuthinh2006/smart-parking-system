@@ -1,6 +1,10 @@
-package com.smartparking;
+package com.smartparking.service;
 
-import static com.smartparking.ParkingData.*;
+import static com.smartparking.model.ParkingData.*;
+
+import com.smartparking.controller.CameraController;
+import com.smartparking.model.*;
+import com.smartparking.store.*;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;

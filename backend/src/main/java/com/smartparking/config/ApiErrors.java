@@ -1,4 +1,4 @@
-package com.smartparking;
+package com.smartparking.config;
 
 import jakarta.validation.ConstraintViolationException;
 import java.util.Map;

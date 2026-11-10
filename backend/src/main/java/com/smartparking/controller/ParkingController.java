@@ -1,6 +1,9 @@
-package com.smartparking;
+package com.smartparking.controller;
 
-import static com.smartparking.ParkingData.*;
+import static com.smartparking.model.ParkingData.*;
+
+import com.smartparking.model.ParkingData.*;
+import com.smartparking.service.ParkingService;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;

@@ -25,7 +25,7 @@ Bạn chịu trách nhiệm về "Bộ não trung tâm" của toàn bộ hệ th
 
 ## 📂 2. CÁC FILE CODE VÀ ĐOẠN CODE TRỌNG TÂM CẦN MỞ SHOW CHO THẦY
 
-### FILE 1: `backend/src/main/java/com/smartparking/ParkingService.java`
+### FILE 1: `backend/src/main/java/com/smartparking/service/ParkingService.java`
 * **Ý nghĩa:** Đây là file quan trọng nhất của toàn bộ Backend.
 * **Đoạn code cốt lõi cần chỉ cho thầy:**
   * **Hàm `cameraReading(Reading reading)`:**
@@ -65,7 +65,7 @@ Bạn chịu trách nhiệm về "Bộ não trung tâm" của toàn bộ hệ th
 
 ---
 
-### FILE 2: `backend/src/main/java/com/smartparking/CameraController.java`
+### FILE 2: `backend/src/main/java/com/smartparking/controller/CameraController.java`
 * **Ý nghĩa:** Cung cấp đầy đủ RESTful API cho ứng dụng Camera AI và Web Dashboard.
 * **Đoạn code cốt lõi:**
   ```java
@@ -102,7 +102,7 @@ Bạn chịu trách nhiệm về "Bộ não trung tâm" của toàn bộ hệ th
 
 ---
 
-### FILE 3: `backend/src/main/java/com/smartparking/DeviceKeyFilter.java`
+### FILE 3: `backend/src/main/java/com/smartparking/config/DeviceKeyFilter.java`
 * **Ý nghĩa:** Bộ lọc an ninh bảo vệ các API phần cứng IoT.
 * **Đoạn code cốt lõi:**
   ```java
@@ -132,7 +132,7 @@ Bạn chịu trách nhiệm về "Bộ não trung tâm" của toàn bộ hệ th
 
 ---
 
-### FILE 5: `backend/src/main/java/com/smartparking/ParkingBroadcast.java` & `RealtimeConfig.java`
+### FILE 5: `backend/src/main/java/com/smartparking/service/ParkingBroadcast.java` & `backend/src/main/java/com/smartparking/config/RealtimeConfig.java`
 * **Ý nghĩa:** Hạ tầng WebSocket STOMP đẩy dữ liệu thời gian thực xuống Web.
 * **Đoạn code cốt lõi:**
   * `RealtimeConfig.java`: Mở endpoint WebSocket `/ws` với SockJS fallback.

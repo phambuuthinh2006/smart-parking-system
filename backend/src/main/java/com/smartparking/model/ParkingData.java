@@ -1,4 +1,4 @@
-package com.smartparking;
+package com.smartparking.model;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;

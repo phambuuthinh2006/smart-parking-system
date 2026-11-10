@@ -1,4 +1,9 @@
-package com.smartparking;
+package com.smartparking.controller;
+
+import com.smartparking.model.ParkingData;
+import com.smartparking.model.TemperatureData;
+import com.smartparking.service.ParkingService;
+import com.smartparking.store.TemperatureStore;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;

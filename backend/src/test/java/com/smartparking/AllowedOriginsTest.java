@@ -2,6 +2,7 @@ package com.smartparking;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.smartparking.config.AllowedOrigins;
 import org.junit.jupiter.api.Test;
 
 class AllowedOriginsTest {

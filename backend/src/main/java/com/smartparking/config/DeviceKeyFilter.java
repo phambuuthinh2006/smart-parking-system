@@ -1,4 +1,4 @@
-package com.smartparking;
+package com.smartparking.config;
 
 import jakarta.servlet.*;
 import jakarta.servlet.http.*;

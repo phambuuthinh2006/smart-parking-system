@@ -1,12 +1,12 @@
-package com.smartparking;
+package com.smartparking.config;
 
 import java.util.Arrays;
 
-final class AllowedOrigins {
+public final class AllowedOrigins {
 
   private AllowedOrigins() {}
 
-  static String[] parse(String value) {
+  public static String[] parse(String value) {
     return Arrays.stream(value.split(","))
       .map(String::trim)
       .filter(origin -> !origin.isEmpty())

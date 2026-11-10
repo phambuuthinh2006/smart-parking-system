@@ -1,6 +1,10 @@
 package com.smartparking;
 
-import static com.smartparking.ParkingData.*;
+import static com.smartparking.model.ParkingData.*;
+import com.smartparking.controller.*;
+import com.smartparking.model.*;
+import com.smartparking.service.*;
+import com.smartparking.store.*;
 import static org.assertj.core.api.Assertions.*;
 
 import java.lang.reflect.Type;

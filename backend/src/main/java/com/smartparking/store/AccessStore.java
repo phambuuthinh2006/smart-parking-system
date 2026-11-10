@@ -1,6 +1,8 @@
-package com.smartparking;
+package com.smartparking.store;
 
-import static com.smartparking.AccessData.*;
+import static com.smartparking.model.AccessData.*;
+import com.smartparking.model.AccessData;
+import com.smartparking.model.ParkingData;
 
 import java.sql.*;
 import java.time.Instant;

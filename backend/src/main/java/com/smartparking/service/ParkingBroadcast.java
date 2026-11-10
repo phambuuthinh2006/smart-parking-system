@@ -1,4 +1,6 @@
-package com.smartparking;
+package com.smartparking.service;
+
+import com.smartparking.model.ParkingData;
 
 import org.slf4j.*;
 import org.springframework.messaging.simp.SimpMessagingTemplate;

@@ -1,4 +1,4 @@
-package com.smartparking;
+package com.smartparking.model;
 
 import jakarta.validation.constraints.*;
 import java.math.BigDecimal;

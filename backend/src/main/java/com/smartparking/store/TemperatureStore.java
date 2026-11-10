@@ -1,6 +1,7 @@
-package com.smartparking;
+package com.smartparking.store;
 
-import static com.smartparking.TemperatureData.*;
+import static com.smartparking.model.TemperatureData.*;
+import com.smartparking.model.TemperatureData;
 
 import java.math.BigDecimal;
 import java.sql.*;
