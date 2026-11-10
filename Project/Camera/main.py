@@ -1,3 +1,4 @@
+import argparse
 import cv2
 import easyocr
 from ultralytics import YOLO
@@ -5,6 +6,14 @@ from ultralytics import YOLO
 # Import các module kết nối mạng HTTP đã bổ sung
 from web_link import PlateUploader
 from gate_link import start_gate_link
+
+# Cho phép chọn camera qua tham số dòng lệnh: python main.py --source 1
+parser = argparse.ArgumentParser(description="Chạy camera nhận diện biển số Smart Parking")
+parser.add_argument("--source", default="1", help="Chỉ số camera (0 = Cam laptop, 1 = USB Webcam ngoài)")
+args = parser.parse_args()
+
+# Chuyển đổi source sang số nguyên nếu là webcam
+cam_source = int(args.source) if args.source.isdigit() else args.source
 
 print("Đang khởi tạo mô hình nhận diện biển số YOLO và EasyOCR...")
 model = YOLO("best.pt")
@@ -17,7 +26,11 @@ web = PlateUploader()
 # (Chạy ngầm, không cần phải mở thêm terminal riêng)
 gate = start_gate_link()
 
-cap = cv2.VideoCapture(0)  # 0 = webcam mặc định
+print(f"Đang mở Camera nguồn: {cam_source}...")
+cap = cv2.VideoCapture(cam_source)
+if not cap.isOpened():
+    print(f"⚠️ Không mở được camera {cam_source}! Đang tự động chuyển sang camera 0 (Laptop)...")
+    cap = cv2.VideoCapture(0)
 
 print("\n>>> CAMERA SẴN SÀNG! Đang quét xe... (Nhấn 'q' trên cửa sổ video để thoát) <<<\n")
 
