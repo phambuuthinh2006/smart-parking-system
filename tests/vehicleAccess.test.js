@@ -14,6 +14,9 @@ test("entry and exit timestamps require explicit passage; repeated entry cannot 
   assert.equal(state.stats.inside, 0);
   assert.equal(state.visits[0].entryAt, null);
   state = pass(state);
+  assert.equal(state.visits[0].status, "PENDING_PARKING");
+  assert.equal(state.stats.inside, 0);
+  state = localAccessAction(state, {kind:"PARKED"}).state;
   state = detect(state, "43A12345");
   assert.equal(state.visits.length, 1);
   assert.equal(state.stats.inside, 1);
@@ -31,7 +34,7 @@ test("gate busy, cancellation, capacity and fire override preserve ledger invari
   state = localAccessAction(state, { kind: "CLOSE" }).state;
   assert.equal(state.visits[0].status, "CANCELLED");
   assert.equal(state.visits[0].entryAt, null);
-  for (let i = 0; i < 4; i++) state = pass(detect(state, `43A1234${i}`));
+  state = localAccessAction(pass(detect(state, "43A12340")), {kind:"PARKED"}).state;
   assert.equal(
     localAccessAction(state, {
       kind: "DETECTION",
@@ -41,7 +44,7 @@ test("gate busy, cancellation, capacity and fire override preserve ledger invari
     "CAPACITY_REACHED",
   );
   assert.equal(localAccessAction(state, { kind: "OPEN" }, true).state, state);
-  assert.equal(state.stats.inside, 4);
+  assert.equal(state.stats.inside, 1);
 });
 test("plate validation rejects OCR noise; older backend has no fabricated vehicle history", () => {
   assert.ok(validPlate("43-A1 123.45"));

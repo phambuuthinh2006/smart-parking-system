@@ -55,7 +55,7 @@ class WebLinkTests(unittest.TestCase):
                 path, key, body = seen[0]
                 self.assertEqual(path, '/api/device/plate-readings')
                 self.assertEqual(body['plateText'], '43A-123.45')
-                self.assertEqual(body['direction'], 'ENTRY')
+                self.assertEqual(body['direction'], 'AUTO')
                 self.assertNotIn('confidence', body)
                 self.assertNotIn(key, json.dumps(body))
 

@@ -1,3 +1,5 @@
+> **EXPERIMENT protocol3**: nạp cả Uno/ESP trong nhánh này. Uno cần GateCycle.h + SlotSensor.h. Xem [EXPERIMENT.md](../EXPERIMENT.md).
+
 # Hướng dẫn Kết nối & Nạp Code: Arduino Uno R3 + ESP8266
 
 Hệ thống được tách thành 2 vi điều khiển riêng biệt:
@@ -57,12 +59,12 @@ Hệ thống được tách thành 2 vi điều khiển riêng biệt:
 
 
 
-## Cập nhật chu kỳ tự động (protocol 2)
+## Cập nhật chu kỳ tự động (protocol 3)
 
 Phải nạp cả Uno và ESP mới. Uno cần `GateCycle.h` cùng thư mục `.ino`.
 ESP `/status` thêm requestId/phase/gateDistance/gateSensorValid/protocolVersion/
 telemetryValid/sampleAgeMs. Khung UART mới:
-`STATUS:slot,distance,gate,temp,ldr,requestId,phase,gateDistance,gateSensorValid`.
+`STATUS:slot,distance,gate,temp,ldr,requestId,phase,gateDistance,gateSensorValid,slotState,gatePresent,slotSensorValid`.
 
 Uno mở khi có yêu cầu và xe dưới15cm ổn định; đóng khi đo được vùng trống hợp lệ
 3mẫu sau tối thiểu1.2s. Chờ xe quá30s thì CANCELLED; đang mở mà mất echo giữ cổng.

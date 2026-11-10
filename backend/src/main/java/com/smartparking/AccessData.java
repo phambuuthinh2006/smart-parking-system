@@ -11,6 +11,7 @@ public final class AccessData {
   private AccessData() {}
 
   public enum Direction {
+    AUTO,
     ENTRY,
     EXIT,
   }
@@ -47,7 +48,10 @@ public final class AccessData {
     @Min(1) Long visitId,
     @NotBlank @Pattern(regexp = "OPEN|CLOSED") String gate,
     @NotBlank @Pattern(regexp = "IDLE|WAITING|OPEN|PASSED|CANCELLED|BLOCKED") String phase,
-    @NotNull @Min(0) @Max(2000) Integer sampleAgeMs
+    @NotNull @Min(0) @Max(2000) Integer sampleAgeMs,
+    @NotNull ParkingData.Status slotStatus,
+    @NotNull Boolean gatePresent,
+    @NotNull Boolean gateSensorValid
   ) {}
 
   public record Visit(
@@ -57,7 +61,9 @@ public final class AccessData {
     String source,
     Instant createdAt,
     Instant entryAt,
-    Instant exitAt
+    Instant exitAt,
+    Instant gateEnteredAt,
+    Instant slotLeftAt
   ) {}
 
   public record Event(
@@ -93,6 +99,7 @@ public final class AccessData {
     long inside,
     long pendingEntry,
     long pendingExit,
+    long pendingParking,
     long exited,
     int capacity
   ) {}

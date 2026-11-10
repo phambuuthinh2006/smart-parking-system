@@ -1,5 +1,5 @@
 server:
-  port: ${PORT:18080}
+  port: ${PORT:18081}
   max-http-request-header-size: 8KB
   error:
     include-message: never
@@ -8,7 +8,7 @@ spring:
   application:
     name: smart-parking
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:55432/parking}
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:55439/parking}
     username: ${POSTGRES_USER:parking}
     password: ${POSTGRES_PASSWORD}
     hikari:
@@ -19,6 +19,6 @@ spring:
 parking:
   access-simulation-enabled: ${ACCESS_SIMULATION_ENABLED:false}
   device-key: ${DEVICE_API_KEY}
-  stale-after-seconds: ${DEVICE_TIMEOUT_SECONDS:45}
+  stale-after-seconds: ${DEVICE_TIMEOUT_SECONDS:5}
   expiry-check-ms: ${EXPIRY_CHECK_MS:5000}
-  allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173}
+  allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5175,http://127.0.0.1:5175,http://localhost:4173,http://127.0.0.1:4173}

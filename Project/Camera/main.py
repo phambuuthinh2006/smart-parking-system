@@ -41,6 +41,8 @@ while True:
 
     results = model(frame, conf=0.5, verbose=False)[0]
 
+    web.observe_frame(len(results.boxes) > 0)
+
     for box in results.boxes:
         x1, y1, x2, y2 = map(int, box.xyxy[0])
         plate = frame[y1:y2, x1:x2]

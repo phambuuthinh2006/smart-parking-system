@@ -5,17 +5,25 @@ export const normalizePlate = (value) =>
 export const validPlate = (value) =>
   /^[0-9]{2}[A-Z]{1,2}[0-9]{4,6}$/.test(normalizePlate(value));
 export const activeVisit = (visit) =>
-  ["PENDING_ENTRY", "INSIDE", "PENDING_EXIT"].includes(visit.status);
+  ["PENDING_ENTRY", "PENDING_PARKING", "INSIDE", "PENDING_EXIT"].includes(visit.status);
 export const visitLabel = (status) =>
   ({
-    PENDING_ENTRY: "Awaiting entry",
-    INSIDE: "Inside",
+    PENDING_ENTRY: "Đang vào · chờ qua cổng",
+    PENDING_PARKING: "Đã qua cổng · chờ vào ô",
+    INSIDE: "Inside · đã vào ô",
     PENDING_EXIT: "Awaiting exit",
     EXITED: "Exited",
     CANCELLED: "Cancelled",
   })[status] || status;
 export const outcomeLabel = (outcome) =>
   ({
+    GATE_ENTERED: "Xe đã qua cổng, đang chờ cảm biến ô đỗ. Chưa tính Inside.",
+    WAITING_PARKING: "Xe đang vào, chờ cảm biến ô đỗ xác nhận.",
+    SLOT_PARKED: "Cảm biến ô đỗ xác nhận có xe. Đã ghi Inside.",
+    ENCOUNTER_USED: "Lần quét này đã xử lý; chờ xe khuất camera rồi tới lại.",
+    WAITING_GATE_SENSOR: "Chờ cảm biến cổng thấy xe và phản hồi mạch hợp lệ.",
+    SLOT_STILL_OCCUPIED: "Ô đỗ chưa xác nhận trống; chưa mở lượt ra.",
+    SLOT_NOT_READY: "Ô đỗ chưa xác nhận trống; chưa duyệt xe vào.",
     ENTRY_PENDING: "Đã duyệt xe vào. Đang chờ mạch mở cổng và phản hồi xe qua.",
     EXIT_PENDING: "Đã duyệt xe ra. Đang chờ mạch phản hồi xe qua.",
     AUTO_PASSAGE_CONFIRMED: "Mạch đã hoàn tất chu kỳ; lượt xe được ghi tự động.",
@@ -50,8 +58,9 @@ export function emptyAccess() {
       inside: 0,
       pendingEntry: 0,
       pendingExit: 0,
+      pendingParking: 0,
       exited: 0,
-      capacity: 4,
+      capacity: 1,
     },
     visits: [],
     events: [],
@@ -108,8 +117,9 @@ export function parseAccess(data) {
     if (!Number.isSafeInteger(stats[key]) || stats[key] < 0)
       throw new Error("Invalid visit statistics");
   if (
-    stats.capacity !== 4 ||
-    stats.inside + stats.pendingEntry > 4 ||
+    ![1,4].includes(stats.capacity) ||
+    !Number.isSafeInteger(stats.pendingParking ?? 0) || (stats.pendingParking ?? 0) < 0 ||
+    stats.inside + stats.pendingEntry + (stats.pendingParking ?? 0) > stats.capacity ||
     stats.pendingExit > stats.inside
   )
     throw new Error("Invalid visit capacity");
@@ -122,6 +132,7 @@ export function parseAccess(data) {
       !validPlate(v.plate) ||
       ![
         "PENDING_ENTRY",
+        "PENDING_PARKING",
         "INSIDE",
         "PENDING_EXIT",
         "EXITED",
@@ -170,19 +181,30 @@ export function localAccessAction(
     visitId = null;
   const b = next.barrier;
   if (fireOverride) return { state, outcome: "FIRE_OVERRIDE" };
-  if (action.kind === "DETECTION") {
+  if (action.kind === "PARKED") {
+    const waiting = next.visits.filter(v => v.status === "PENDING_PARKING");
+    if (waiting.length !== 1) throw new Error("Exactly one arrival must be waiting for P01");
+    const current = waiting[0];
+    current.status = "INSIDE";
+    current.entryAt = at;
+    visitId = current.id;
+    outcome = "SLOT_PARKED";
+  } else if (action.kind === "DETECTION") {
     if (!validPlate(action.plate))
       throw new Error("Use a plate such as 43A-123.45.");
     const plate = normalizePlate(action.plate),
       current = next.visits.find((v) => v.plate === plate && activeVisit(v));
-    if (action.direction === "ENTRY" && current) {
+    if (current?.status === "PENDING_PARKING") {
+      outcome = "WAITING_PARKING";
+      visitId = current.id;
+    } else if (action.direction === "ENTRY" && current) {
       outcome =
         current.status === "PENDING_ENTRY" ? "ENTRY_PENDING" : "ALREADY_INSIDE";
       visitId = current.id;
     } else if (action.direction === "EXIT" && !current) outcome = "NOT_INSIDE";
     else if (b.position === "OPEN") outcome = "BARRIER_BUSY";
     else if (action.direction === "ENTRY") {
-      if (next.visits.filter(activeVisit).length >= 4)
+      if (next.visits.filter(activeVisit).length >= 1)
         outcome = "CAPACITY_REACHED";
       else {
         visitId = ++next.sequence;
@@ -233,13 +255,14 @@ export function localAccessAction(
         throw new Error("Virtual barrier is already closed.");
       if (current) {
         if (action.kind === "PASSAGE") {
-          current.status = b.direction === "ENTRY" ? "INSIDE" : "EXITED";
-          current[b.direction === "ENTRY" ? "entryAt" : "exitAt"] = at;
+          current.status = b.direction === "ENTRY" ? "PENDING_PARKING" : "EXITED";
+          current[b.direction === "ENTRY" ? "gateEnteredAt" : "exitAt"] = at;
         } else
           current.status = b.direction === "ENTRY" ? "CANCELLED" : "INSIDE";
       }
       outcome =
         action.kind === "PASSAGE" ? "PASSAGE_CONFIRMED" : "CANCELLED_CLOSE";
+      if (action.kind === "PASSAGE" && b.direction === "ENTRY") outcome = "GATE_ENTERED";
       Object.assign(b, {
         position: "CLOSED",
         version: b.version + 1,
@@ -278,7 +301,8 @@ export function localAccessAction(
       .length,
     pendingExit: next.visits.filter((v) => v.status === "PENDING_EXIT").length,
     exited: next.visits.filter((v) => v.status === "EXITED").length,
-    capacity: 4,
+    pendingParking: next.visits.filter(v => v.status === "PENDING_PARKING").length,
+    capacity: 1,
   };
   return { state: next, outcome };
 }

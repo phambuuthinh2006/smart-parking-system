@@ -42,11 +42,11 @@ def load_settings():
 class HttpLink:
     def __init__(self):
         config = load_settings()
-        self.base = config.get("DEVICE_BACKEND_URL", "http://192.168.4.2:18080").rstrip("/")
+        self.base = config.get("DEVICE_BACKEND_URL", "http://192.168.4.2:18081").rstrip("/")
         self.key = config.get("DEVICE_API_KEY", "")
-        self.direction = config.get("PARKING_DIRECTION", "ENTRY")
-        if self.direction not in ("ENTRY", "EXIT"):
-            self.direction = "ENTRY"
+        self.direction = config.get("PARKING_DIRECTION", "AUTO")
+        if self.direction not in ("AUTO", "ENTRY", "EXIT"):
+            raise ValueError("PARKING_DIRECTION must be AUTO, ENTRY or EXIT")
 
         class NoRedirect(request.HTTPRedirectHandler):
             def redirect_request(self, *args):
@@ -70,6 +70,30 @@ class HttpLink:
             return json.load(response)
 
 
+class CameraEncounter:
+    """No new encounter until consecutive observed empty frames span two seconds.
+
+    Uses plate REGION presence, not OCR success, so OCR noise is not a departure.
+    """
+    def __init__(self):
+        self.id = str(uuid.uuid4())
+        self.empty_since = None
+        self.cleared = False
+
+    def observe(self, present, now):
+        if present:
+            if self.cleared:
+                self.id = str(uuid.uuid4())
+            self.empty_since = None
+            self.cleared = False
+        else:
+            if self.empty_since is None:
+                self.empty_since = now
+            elif now-self.empty_since >= 2:
+                self.cleared = True
+        return self.id
+
+
 class PlateUploader:
     def __init__(self, link=None):
         self.link = link or HttpLink()
@@ -79,8 +103,12 @@ class PlateUploader:
         self.last_at = 0
         self.recent = {}
         self.last_result = None
+        self.encounter = CameraEncounter()
         self.thread = threading.Thread(target=self._send_loop, daemon=True)
         self.thread.start()
+
+    def observe_frame(self, plate_region_present):
+        return self.encounter.observe(plate_region_present, time.monotonic())
 
     def submit(self, text):
         """Gửi biển số đọc được vào hàng đợi với cơ chế chống spam (cooldown 3s cùng 1 biển)."""
@@ -98,6 +126,7 @@ class PlateUploader:
             "eventId": str(uuid.uuid4()),
             "plateText": text,
             "direction": self.link.direction,
+            "encounterId": self.encounter.id,
             "observedAt": datetime.now(timezone.utc).isoformat()
         }
 
@@ -158,6 +187,7 @@ if __name__ == "__main__":
             "eventId": str(uuid.uuid4()),
             "plateText": args.send,
             "direction": link.direction,
+            "encounterId": str(uuid.uuid4()),
             "observedAt": datetime.now(timezone.utc).isoformat()
         })
         print(f"Kết quả gửi biển '{args.send}': {res.get('outcome')}")

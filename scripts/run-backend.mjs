@@ -6,9 +6,10 @@ const child = spawn(
     stdio: "inherit",
     env: {
       ...process.env,
+      PORT: process.env.API_PORT || "18081",
       DATABASE_URL:
         process.env.DATABASE_URL ||
-        `jdbc:postgresql://127.0.0.1:${process.env.POSTGRES_PORT || 55432}/parking`,
+        `jdbc:postgresql://127.0.0.1:${process.env.POSTGRES_PORT || 55439}/parking`,
     },
   },
 );

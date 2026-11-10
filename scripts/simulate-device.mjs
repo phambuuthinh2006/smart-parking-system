@@ -1,7 +1,7 @@
 // HTTP client only: all persistence and realtime updates still go through Spring Boot.
 const base =
   process.env.DEVICE_BACKEND_URL ||
-  `http://127.0.0.1:${process.env.API_PORT || 18080}`;
+  `http://127.0.0.1:${process.env.API_PORT || 18081}`;
 const key = process.env.DEVICE_API_KEY;
 if (!key)
   throw new Error("Missing DEVICE_API_KEY. Run npm run backend:init first.");

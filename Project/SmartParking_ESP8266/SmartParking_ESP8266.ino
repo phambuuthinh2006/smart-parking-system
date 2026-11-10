@@ -35,6 +35,9 @@ bool gateSensorValid = false;
 bool telemetryReceived = false;
 unsigned long lastTelemetryAt = 0;
 String serialLine;
+String slotState = "UNKNOWN";
+bool gatePresent = false;
+bool slotSensorValid = false;
 
 
 // ================= HTTP API HANDLERS =================
@@ -66,7 +69,7 @@ void handleClose() {
 
 // API lấy trạng thái chỗ đỗ xe: GET /slot
 void handleSlot() {
-  String status = slotOccupied ? "OCCUPIED" : "AVAILABLE";
+  String status = slotState;
 
   String json = "{";
   json += "\"slot_id\":1,";
@@ -80,7 +83,7 @@ void handleSlot() {
 // API lấy toàn bộ trạng thái hệ thống: GET /status
 void handleStatus() {
   String gateStatus = gateOpen ? "OPEN" : "CLOSED";
-  String slotStatus = slotOccupied ? "OCCUPIED" : "AVAILABLE";
+  String slotStatus = slotState;
   bool isFire = (currentTemperature >= 45.0);
 
   String json = "{";
@@ -91,13 +94,15 @@ void handleStatus() {
   json += "\"temperatureValid\":true,";
   json += "\"fireAlarm\":" + String(isFire ? "true" : "false") + ",";
   json += "\"light\":" + String(currentLightValue) + ",";
-  json += "\"protocolVersion\":2,";
+  json += "\"protocolVersion\":3,";
   json += "\"telemetryValid\":" + String(telemetryReceived && millis() - lastTelemetryAt <= 2000 ? "true" : "false") + ",";
   json += "\"sampleAgeMs\":" + String(telemetryReceived ? millis() - lastTelemetryAt : 4294967295UL) + ",";
   json += "\"requestId\":\"" + cycleRequestId + "\",";
   json += "\"phase\":\"" + cyclePhase + "\",";
   json += "\"gateDistance\":" + String(gateDistance, 1) + ",";
-  json += "\"gateSensorValid\":" + String(gateSensorValid ? "true" : "false");
+  json += "\"gateSensorValid\":" + String(gateSensorValid ? "true" : "false") + ",";
+  json += "\"gatePresent\":" + String(gatePresent ? "true" : "false") + ",";
+  json += "\"slotSensorValid\":" + String(slotSensorValid ? "true" : "false");
   json += "}";
 
   server.send(200, "application/json", json);
@@ -111,15 +116,16 @@ void handleStatus() {
 void processUnoLine(String line) {
   line.trim();
   if (!line.startsWith("STATUS:")) return;
-  String fields[9];
+  String fields[12];
   int start = 7;
-  for (int i = 0; i < 9; ++i) {
+  for (int i = 0; i < 12; ++i) {
     int end = line.indexOf(',', start);
-    if (i < 8 && end < 0) return;  // Old firmware is not valid cycle telemetry.
-    fields[i] = i == 8 ? line.substring(start) : line.substring(start, end);
+    if (i < 11 && end < 0) return;  // Old firmware is not valid cycle telemetry.
+    fields[i] = i == 11 ? line.substring(start) : line.substring(start, end);
     start = end + 1;
   }
   if (fields[5].length() > 36 || fields[6].length() > 12) return;
+  if (fields[9] != "AVAILABLE" && fields[9] != "OCCUPIED" && fields[9] != "UNKNOWN") return;
   slotOccupied = fields[0] == "1";
   slotDistance = fields[1].toFloat();
   gateOpen = fields[2] == "1";
@@ -129,6 +135,9 @@ void processUnoLine(String line) {
   cyclePhase = fields[6];
   gateDistance = fields[7].toFloat();
   gateSensorValid = fields[8] == "1";
+  slotSensorValid = fields[11] == "1";
+  slotState = slotSensorValid ? fields[9] : "UNKNOWN";
+  gatePresent = fields[10] == "1";
   telemetryReceived = true;
   lastTelemetryAt = millis();
 }

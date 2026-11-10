@@ -71,7 +71,9 @@ public class AccessStore {
     String source,
     String outcome,
     Long visitId,
-    Long expectedVersion
+    Long expectedVersion,
+    String requestedDirection,
+    UUID encounterId
   ) {}
 
   private Saved saved(UUID eventId) {
@@ -89,7 +91,9 @@ public class AccessStore {
             r.getString("source"),
             r.getString("outcome"),
             number(r, "visit_id"),
-            number(r, "expected_version")
+            number(r, "expected_version"),
+            r.getString("requested_direction"),
+            r.getObject("encounter_id", UUID.class)
           ),
         eventId
       )
@@ -105,7 +109,14 @@ public class AccessStore {
     boolean fireOverride,
     Instant now
   ) {
+    return detect(report, source, fireOverride, now, null);
+  }
+
+  @Transactional(propagation = Propagation.MANDATORY)
+  public Applied detect(Detection report, String source, boolean fireOverride, Instant now, UUID encounterId) {
     if (source.equals("SIMULATION")) requireSimulation();
+    boolean auto = report.direction() == Direction.AUTO;
+    if (auto && encounterId == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "AUTO requires a camera encounterId");
     String plate = normalizePlate(report.plate());
     Instant observed =
       report.observedAt() == null
@@ -116,7 +127,8 @@ public class AccessStore {
       if (
         !prior.kind.equals("DETECTION") ||
         !Objects.equals(prior.plate, plate) ||
-        !Objects.equals(prior.direction, report.direction().name()) ||
+        !Objects.equals(prior.requestedDirection == null ? prior.direction : prior.requestedDirection, report.direction().name()) ||
+        !Objects.equals(prior.encounterId, encounterId) ||
         (prior.confidence == null ? report.confidence() != null : report.confidence() == null || prior.confidence.compareTo(report.confidence()) != 0) ||
         !Objects.equals(prior.cameraId, report.cameraId()) ||
         !Objects.equals(prior.observedAt, observed) ||
@@ -136,30 +148,42 @@ public class AccessStore {
     Long visitId = null;
     String outcome;
     var matches = db.query(
-      "SELECT * FROM vehicle_visit WHERE plate=? AND status IN ('PENDING_ENTRY','INSIDE','PENDING_EXIT')",
+      "SELECT * FROM vehicle_visit WHERE plate=? AND status IN ('PENDING_ENTRY','PENDING_PARKING','INSIDE','PENDING_EXIT')",
       this::visit,
       plate
     );
     Visit current = matches.isEmpty() ? null : matches.get(0);
+    Direction direction = auto ? (current != null && (current.status().equals("INSIDE") || current.status().equals("PENDING_EXIT")) ? Direction.EXIT : Direction.ENTRY) : report.direction();
+    boolean opened = false;
     boolean registered = Boolean.TRUE.equals(db.queryForObject(
       "SELECT EXISTS(SELECT 1 FROM registered_plate WHERE plate=? AND enabled)", Boolean.class, plate));
     if (fireOverride) outcome = "FIRE_OVERRIDE";
     else if (!registered) outcome = "NOT_REGISTERED";
-    else if (report.direction() == Direction.ENTRY && current != null) {
+    else if (auto && Boolean.TRUE.equals(db.queryForObject("SELECT EXISTS(SELECT 1 FROM camera_encounter WHERE encounter_id=?)", Boolean.class, encounterId))) outcome = "ENCOUNTER_USED";
+    else if (current != null && current.status().equals("PENDING_PARKING")) {
+      outcome = "WAITING_PARKING"; visitId = current.id();
+    }
+    else if (auto && current != null && (current.status().equals("PENDING_ENTRY") || current.status().equals("PENDING_EXIT"))) {
+      outcome = current.status().equals("PENDING_ENTRY") ? "ENTRY_PENDING" : "EXIT_PENDING"; visitId = current.id();
+    }
+    else if (auto && !gateReady()) outcome = "WAITING_GATE_SENSOR";
+    else if (auto && direction == Direction.EXIT && (!slotIs("AVAILABLE") || current.slotLeftAt() == null)) outcome = "SLOT_STILL_OCCUPIED";
+    else if (auto && direction == Direction.ENTRY && !slotIs("AVAILABLE")) outcome = "SLOT_NOT_READY";
+    else if (direction == Direction.ENTRY && current != null) {
       outcome = current.status().equals("PENDING_ENTRY")
         ? "ENTRY_PENDING"
         : "ALREADY_INSIDE";
       visitId = current.id();
     } else if (
-      report.direction() == Direction.EXIT && current == null
+      direction == Direction.EXIT && current == null
     ) outcome = "NOT_INSIDE";
     else if (barrier.position().equals("OPEN")) outcome = "BARRIER_BUSY";
-    else if (report.direction() == Direction.ENTRY) {
+    else if (direction == Direction.ENTRY) {
       long count = db.queryForObject(
-        "SELECT count(*) FROM vehicle_visit WHERE status IN ('PENDING_ENTRY','INSIDE','PENDING_EXIT')",
+        "SELECT count(*) FROM vehicle_visit WHERE status IN ('PENDING_ENTRY','PENDING_PARKING','INSIDE','PENDING_EXIT')",
         Long.class
       );
-      if (count >= 4) outcome = "CAPACITY_REACHED";
+      if (count >= 1) outcome = "CAPACITY_REACHED";
       else {
         visitId = db.queryForObject(
           "INSERT INTO vehicle_visit(plate,status,source,created_at) VALUES (?,'PENDING_ENTRY',?,?) RETURNING id",
@@ -169,6 +193,7 @@ public class AccessStore {
           Timestamp.from(now)
         );
         open(visitId, "ENTRY", now);
+        opened = true;
         outcome = "ENTRY_PENDING";
       }
     } else if (!current.status().equals("INSIDE")) {
@@ -181,20 +206,24 @@ public class AccessStore {
         visitId
       );
       open(visitId, "EXIT", now);
+      opened = true;
       outcome = "EXIT_PENDING";
     }
+    if (auto && opened) db.update("INSERT INTO camera_encounter(encounter_id,plate,visit_id,created_at) VALUES (?,?,?,?)", encounterId, plate, visitId, Timestamp.from(now));
     db.update(
-      "INSERT INTO vehicle_access_event(event_id,kind,plate,direction,confidence,camera_id,observed_at,source,outcome,visit_id,created_at) VALUES (?,'DETECTION',?,?,?,?,?,?,?,?,?)",
+      "INSERT INTO vehicle_access_event(event_id,kind,plate,direction,confidence,camera_id,observed_at,source,outcome,visit_id,created_at,requested_direction,encounter_id) VALUES (?,'DETECTION',?,?,?,?,?,?,?,?,?,?,?)",
       report.eventId(),
       plate,
-      report.direction().name(),
+      direction.name(),
       report.confidence(),
       report.cameraId(),
       observed == null ? null : Timestamp.from(observed),
       source,
       outcome,
       visitId,
-      Timestamp.from(now)
+      Timestamp.from(now),
+      report.direction().name(),
+      encounterId
     );
     return new Applied(outcome, visitId, false);
   }
@@ -252,7 +281,7 @@ public class AccessStore {
       if (visitId != null) {
         if (command.action() == Action.PASSAGE) {
           if ("ENTRY".equals(direction)) db.update(
-            "UPDATE vehicle_visit SET status='INSIDE',entry_at=? WHERE id=? AND status='PENDING_ENTRY'",
+            "UPDATE vehicle_visit SET status='PENDING_PARKING',gate_entered_at=? WHERE id=? AND status='PENDING_ENTRY'",
             Timestamp.from(now),
             visitId
           );
@@ -279,6 +308,7 @@ public class AccessStore {
           : "CANCELLED_CLOSE";
       if (source.equals("DEVICE")) outcome = command.action() == Action.PASSAGE
         ? "AUTO_PASSAGE_CONFIRMED" : "AUTO_CANCELLED_CLOSE";
+      if (command.action() == Action.PASSAGE && "ENTRY".equals(direction)) outcome = "GATE_ENTERED";
     }
     db.update(
       "INSERT INTO vehicle_access_event(event_id,kind,plate,direction,source,outcome,visit_id,expected_version,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -302,8 +332,8 @@ public class AccessStore {
 
   @Transactional(propagation = Propagation.MANDATORY)
   public Applied hardwareFeedback(HardwareReport report, boolean fire, Instant now) {
-    db.update("UPDATE barrier_hardware SET position=?,phase=?,request_id=?,last_seen_at=? WHERE id=1",
-      report.gate(), report.phase(), report.requestId(), Timestamp.from(now));
+    db.update("UPDATE barrier_hardware SET position=?,phase=?,request_id=?,last_seen_at=?,gate_present=?,gate_sensor_valid=? WHERE id=1",
+      report.gate(), report.phase(), report.requestId(), Timestamp.from(now), report.gatePresent(), report.gateSensorValid());
     boolean passed = report.phase().equals("PASSED");
     if (!passed && !report.phase().equals("CANCELLED"))
       return new Applied("HARDWARE_UPDATED", null, false);
@@ -322,6 +352,35 @@ public class AccessStore {
     return applied;
   }
 
+  private boolean slotIs(String status) {
+    return Boolean.TRUE.equals(db.queryForObject("SELECT EXISTS(SELECT 1 FROM parking_space WHERE id='P01' AND status=? AND last_reported_at > now()-interval '5 seconds')", Boolean.class, status));
+  }
+
+  private boolean gateReady() {
+    return Boolean.TRUE.equals(db.queryForObject("SELECT EXISTS(SELECT 1 FROM barrier_hardware WHERE id=1 AND position='CLOSED' AND gate_present AND gate_sensor_valid AND last_seen_at > now()-interval '5 seconds')", Boolean.class));
+  }
+
+  @Transactional(propagation = Propagation.MANDATORY)
+  public void reconcileSlot(Instant now) {
+    if (slotIs("OCCUPIED")) {
+      // A single P01 sensor can only identify the one outstanding arrival.
+      var pending = db.query("SELECT * FROM vehicle_visit WHERE status='PENDING_PARKING'", this::visit);
+      if (pending.size() == 1) {
+        Visit visit = pending.get(0);
+        boolean arrived = Boolean.TRUE.equals(db.queryForObject("SELECT EXISTS(SELECT 1 FROM vehicle_visit WHERE id=? AND slot_clear_confirmed_at>=gate_entered_at)", Boolean.class, visit.id()));
+        if (arrived) {
+          db.update("UPDATE vehicle_visit SET status='INSIDE',entry_at=?,slot_left_at=NULL WHERE id=? AND status='PENDING_PARKING'", Timestamp.from(now), visit.id());
+          db.update("INSERT INTO vehicle_access_event(event_id,kind,plate,direction,source,outcome,visit_id,created_at) VALUES (?,'SLOT',?,'ENTRY','DEVICE','SLOT_PARKED',?,?)", UUID.nameUUIDFromBytes(("parked:"+visit.id()).getBytes(java.nio.charset.StandardCharsets.UTF_8)), visit.plate(), visit.id(), Timestamp.from(now));
+          db.update("UPDATE camera_latest SET outcome='SLOT_PARKED' WHERE plate=?", visit.plate());
+        }
+      }
+      db.update("UPDATE vehicle_visit SET slot_left_at=NULL WHERE status='INSIDE'");
+    } else if (slotIs("AVAILABLE")) {
+      db.update("UPDATE vehicle_visit SET slot_clear_confirmed_at=? WHERE status='PENDING_PARKING' AND slot_clear_confirmed_at IS NULL AND gate_entered_at<=?", Timestamp.from(now), Timestamp.from(now));
+      db.update("UPDATE vehicle_visit SET slot_left_at=? WHERE status='INSIDE' AND slot_left_at IS NULL", Timestamp.from(now));
+    }
+  }
+
   private Visit visit(ResultSet r, int row) throws SQLException {
     return new Visit(
       r.getLong("id"),
@@ -330,7 +389,9 @@ public class AccessStore {
       r.getString("source"),
       instant(r, "created_at"),
       instant(r, "entry_at"),
-      instant(r, "exit_at")
+      instant(r, "exit_at"),
+      instant(r, "gate_entered_at"),
+      instant(r, "slot_left_at")
     );
   }
 
@@ -361,18 +422,19 @@ public class AccessStore {
   @Transactional(readOnly = true)
   public State snapshot(boolean fire) {
     var stats = db.queryForObject(
-      "SELECT count(*) FILTER(WHERE status IN ('INSIDE','PENDING_EXIT')) AS inside,count(*) FILTER(WHERE status='PENDING_ENTRY') AS pending_entry,count(*) FILTER(WHERE status='PENDING_EXIT') AS pending_exit,count(*) FILTER(WHERE status='EXITED') AS exited FROM vehicle_visit",
+      "SELECT count(*) FILTER(WHERE status IN ('INSIDE','PENDING_EXIT')) AS inside,count(*) FILTER(WHERE status='PENDING_ENTRY') AS pending_entry,count(*) FILTER(WHERE status='PENDING_EXIT') AS pending_exit,count(*) FILTER(WHERE status='PENDING_PARKING') AS pending_parking,count(*) FILTER(WHERE status='EXITED') AS exited FROM vehicle_visit",
       (r, n) ->
         new Stats(
           r.getLong("inside"),
           r.getLong("pending_entry"),
           r.getLong("pending_exit"),
+          r.getLong("pending_parking"),
           r.getLong("exited"),
-          4
+          1
         )
     );
     var visits = db.query(
-      "SELECT * FROM vehicle_visit ORDER BY CASE WHEN status IN ('PENDING_ENTRY','INSIDE','PENDING_EXIT') THEN 0 ELSE 1 END,id DESC LIMIT 100",
+      "SELECT * FROM vehicle_visit ORDER BY CASE WHEN status IN ('PENDING_ENTRY','PENDING_PARKING','INSIDE','PENDING_EXIT') THEN 0 ELSE 1 END,id DESC LIMIT 100",
       this::visit
     );
     var events = db.query(

@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
 from gate_link import AutomaticCycle, GatePlan, GateLinkRunner, read_hardware, send_esp_command
-from web_link import HttpLink
+from web_link import HttpLink, CameraEncounter
 
 
 def state(version, pending=False):
@@ -15,6 +15,18 @@ def state(version, pending=False):
 
 
 class AutomaticCycleTests(unittest.TestCase):
+    def test_encounter_only_changes_after_observed_empty_frames_not_ocr_noise(self):
+        encounter = CameraEncounter()
+        first = encounter.observe(True, 0)
+        self.assertEqual(encounter.observe(True, 100), first)
+        encounter.observe(False, 101)
+        self.assertEqual(encounter.observe(True, 102), first)
+        encounter.observe(False, 103)
+        encounter.observe(False, 105.1)
+        second = encounter.observe(True, 106)
+        self.assertNotEqual(first, second)
+        self.assertEqual(encounter.observe(True, 500), second)
+
     def test_startup_never_replays_but_new_command_retries_same_id_and_stops_after_ack(self):
         plan, auto = GatePlan(), AutomaticCycle()
         s = state(1, True)
@@ -35,7 +47,7 @@ class AutomaticCycleTests(unittest.TestCase):
 
     def test_feedback_uses_hardware_token_not_assumed_backend_state(self):
         packet = AutomaticCycle().feedback(state(2, True), {
-            'requestId': 'old-cycle', 'phase': 'BLOCKED', 'gate': 'OPEN', 'sampleAgeMs': 10})
+            'requestId': 'old-cycle', 'phase': 'BLOCKED', 'gate': 'OPEN', 'sampleAgeMs': 10, 'slot': 'AVAILABLE', 'slotSensorValid': True, 'gatePresent': True, 'gateSensorValid': True})
         self.assertEqual(packet['requestId'], 'old-cycle')
         self.assertEqual(packet['phase'], 'BLOCKED')
         self.assertEqual(packet['expectedVersion'], 2)
@@ -43,8 +55,8 @@ class AutomaticCycleTests(unittest.TestCase):
     def test_http_bridge_dispatches_correlated_open_and_reports_completion(self):
         reached, completed = threading.Event(), threading.Event()
         backend_state = state(0)
-        physical = {'protocolVersion': 2, 'telemetryValid': True, 'sampleAgeMs': 10,
-                    'gate': 'CLOSED', 'phase': 'IDLE', 'requestId': ''}
+        physical = {'protocolVersion': 3, 'telemetryValid': True, 'sampleAgeMs': 10,
+                    'gate': 'CLOSED', 'phase': 'IDLE', 'requestId': '', 'slot': 'AVAILABLE', 'slotSensorValid': True, 'gatePresent': True, 'gateSensorValid': True}
         commands, feedback = [], []
 
         class Handler(BaseHTTPRequestHandler):

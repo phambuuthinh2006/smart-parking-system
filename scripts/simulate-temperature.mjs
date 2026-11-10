@@ -24,7 +24,7 @@ if (!process.env.DEVICE_API_KEY)
   throw new Error("Missing DEVICE_API_KEY. Run npm run backend:init first.");
 const base =
   process.env.DEVICE_BACKEND_URL ||
-  `http://127.0.0.1:${process.env.API_PORT || 18080}`;
+  `http://127.0.0.1:${process.env.API_PORT || 18081}`;
 const cycle = [27, 49, 50, 47, 45];
 let tick = 0;
 console.log(

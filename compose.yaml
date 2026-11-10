@@ -1,4 +1,4 @@
-name: smart-parking
+name: smart-parking-experiment
 services:
   postgres:
     image: postgres:16
@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: parking
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run npm run backend:init first}
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-55439}:5432"
     volumes:
       - parking-data:/var/lib/postgresql/data
     healthcheck:
@@ -19,15 +19,16 @@ services:
   backend:
     build: ./backend
     environment:
+      PORT: 18080
       DATABASE_URL: jdbc:postgresql://postgres:5432/parking
       POSTGRES_USER: parking
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       DEVICE_API_KEY: ${DEVICE_API_KEY:?Run npm run backend:init first}
       ACCESS_SIMULATION_ENABLED: ${ACCESS_SIMULATION_ENABLED:-false}
-      DEVICE_TIMEOUT_SECONDS: ${DEVICE_TIMEOUT_SECONDS:-45}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173}
+      DEVICE_TIMEOUT_SECONDS: ${DEVICE_TIMEOUT_SECONDS:-5}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5175,http://127.0.0.1:5175,http://localhost:4173,http://127.0.0.1:4173}
     ports:
-      - "${API_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-18080}:18080"
+      - "${API_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-18081}:18080"
     depends_on:
       postgres:
         condition: service_healthy

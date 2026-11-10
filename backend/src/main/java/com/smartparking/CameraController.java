@@ -12,7 +12,11 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api")
 public class CameraController {
   public record Reading(@NotNull UUID eventId, @NotBlank @Size(max=100) String plateText,
-                        @NotNull AccessData.Direction direction, Instant observedAt) {}
+                        @NotNull AccessData.Direction direction, Instant observedAt, UUID encounterId) {
+    public Reading(UUID eventId, String plateText, AccessData.Direction direction, Instant observedAt) {
+      this(eventId, plateText, direction, observedAt, null);
+    }
+  }
   public record Registration(@NotBlank @Size(max=24) String plate, boolean enabled) {}
   public record Registered(String plate, boolean enabled) {}
   public record Latest(UUID eventId, String plateText, String plate, String outcome, Instant receivedAt) {}

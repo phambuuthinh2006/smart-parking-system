@@ -1,3 +1,5 @@
+> **Nhánh thử nghiệm `experiment/auto-entry-exit`**: qua cổng chưa tính Inside; vào ô P01 mới Inside. Chạy riêng tại web5175/API18081/DB55439. Đọc [EXPERIMENT.md](EXPERIMENT.md).
+
 # Smart Parking System
 
 Dashboard React + Vite + Tailwind CSS với backend **Spring Boot 3.5 / Java 17**, **PostgreSQL 16** và **WebSocket/STOMP**. Prototype gồm bốn chỗ P01–P04, một thiết bị `esp8266-01`.

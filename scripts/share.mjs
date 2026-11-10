@@ -82,7 +82,7 @@ try {
   if (!stopping) {
     server = await createServer({
       root,
-      server: { host: "127.0.0.1", port: 5173, open: false },
+      server: { host: "127.0.0.1", port: 5175, open: false },
     });
     await server.listen();
     const address = server.httpServer.address();

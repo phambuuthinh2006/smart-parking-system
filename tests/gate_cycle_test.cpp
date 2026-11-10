@@ -1,7 +1,17 @@
 #include "../Project/SmartParking_Uno/GateCycle.h"
 #include <assert.h>
+#include "../Project/SmartParking_Uno/SlotSensor.h"
 
 int main() {
+  SlotSensor slot;
+  slot.sample(10); slot.sample(10);
+  assert(strcmp(slot.status, "UNKNOWN") == 0);
+  slot.sample(10); assert(strcmp(slot.status, "OCCUPIED") == 0);
+  slot.sample(16); assert(strcmp(slot.status, "OCCUPIED") == 0);
+  slot.sample(-1); assert(strcmp(slot.status, "UNKNOWN") == 0);
+  slot.sample(30); slot.sample(30); slot.sample(30);
+  assert(strcmp(slot.status, "AVAILABLE") == 0);
+
   const char* id = "11111111-2222-3333-8444-555555555555";
   GateCycle c;
   assert(!c.request("partial-uart-id", 0));

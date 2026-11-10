@@ -47,7 +47,7 @@ const child = spawn("./mvnw", ["test"], {
     ...process.env,
     TEST_DATABASE_URL:
       process.env.TEST_DATABASE_URL ||
-      `jdbc:postgresql://127.0.0.1:${process.env.POSTGRES_PORT || 55432}/parking_test`,
+      `jdbc:postgresql://127.0.0.1:${process.env.POSTGRES_PORT || 55439}/parking_test`,
   },
 });
 child.on("exit", (code) => process.exit(code ?? 1));

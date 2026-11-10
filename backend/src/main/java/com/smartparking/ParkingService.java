@@ -101,6 +101,7 @@ public class ParkingService {
     }
     for (var reading : report.spaces())
       updateSpace(reading.spaceId(), reading.status(), now, "DEVICE");
+    access.reconcileSlot(now);
     touch(now);
     return publish();
   }
@@ -156,7 +157,7 @@ public class ParkingService {
     if (plate != null) {
       // Raw OCR has no calibrated confidence. Store null instead of inventing one.
       var applied = access.detect(new AccessData.Detection(reading.eventId(), plate, reading.direction(), null,
-        "project-camera", reading.observedAt()), "CAMERA", temperature.snapshot().gateOpenRequested(), now);
+        "project-camera", reading.observedAt()), "CAMERA", temperature.snapshot().gateOpenRequested(), now, reading.encounterId());
       outcome = applied.outcome();
       accessResult(applied);
     }
@@ -207,7 +208,11 @@ public class ParkingService {
   @Transactional
   public AccessData.Result hardwareFeedback(AccessData.HardwareReport report) {
     lockDevice();
-    var applied = access.hardwareFeedback(report, temperature.snapshot().gateOpenRequested(), Instant.now());
+    Instant now = Instant.now();
+    updateSpace("P01", report.slotStatus(), now, "DEVICE");
+    var applied = access.hardwareFeedback(report, temperature.snapshot().gateOpenRequested(), now);
+    access.reconcileSlot(now);
+    touch(now);
     // Even duplicate cycle reports refresh the hardware liveness displayed by the UI.
     db.update("UPDATE device SET revision=revision+1 WHERE id='esp8266-01'");
     return new AccessData.Result(applied.outcome(), applied.visitId(), applied.duplicate(), publish());
