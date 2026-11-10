@@ -173,3 +173,39 @@ python3 -m unittest discover -s Project/Camera -p 'test*.py' -v
 
 Compile cả hai sketch trong Arduino IDE trước khi upload. Chưa có kiểm chứng trên mạch/
 webcam thật trong lần triển khai thử nghiệm; không tự nạp hoặc điều khiển mạch từ máy Thịnh.
+
+
+## Webcam Windows lỗi MSMF và HTTPError
+
+Nếu log in `Backend: http://...:18080`, Camera/.env vẫn trỏ main. Đổi sang IP máy
+web hiện tại, **cổng18081**, APIkey của backend thử nghiệm và `PARKING_DIRECTION=AUTO`.
+Biến môi trường hệ thống ưu tiên hơn file.env, nên nếu sửa file mà log vẫn sai,
+kiểm tra các biến DEVICE_BACKEND_URL/PARKING_DIRECTION đã đặt trong PowerShell.
+Không dùng keymain cho experiment. Đăng ký lại biển trên đúng backend thử nghiệm.
+
+Bản mới kiểm tra đúng loại backend trước khi register/send hoặc chạy main.py;
+log HTTP hiển thị mã401/400/404 thay vì chỉ HTTPError. Cảnh báo Torch/EasyOCR về
+quantization/pin_memory không phải cùng lỗi với webcam không đọc được frame.
+
+Windows mặc định thử DirectShow trước MSMF; chỉ báo sẵn sàng khi có khung hình thật.
+Chọn backend capture theo [tài liệu OpenCV](https://docs.opencv.org/4.x/d4/d15/group__videoio__flags__base.html).
+Không tự chuyển sang webcam0 để tránh mở nhầm thiết bị. Đóng ứng dụng Camera,
+Teams/Zoom hoặc tab trình duyệt đang giữ webcam trước khi thử.
+
+Xem webcam riêng, không chạy model/không gửi API/không điều khiển mạch:
+
+```powershell
+python camera_io.py --source 1 --capture-backend dshow
+```
+
+Nhấn q đóng preview trước khi chạy main. Nếu source1 không đúng, thử source0 hoặc
+index thật của webcam. Cũng kiểm tra quyền Camera cho desktop apps trong Windows và cáp/cổng USB.
+Khi preview ổn và config đúng:
+
+```powershell
+python web_link.py --register "36H-12345"
+python main.py --source 1 --capture-backend dshow
+```
+
+Chỉ cập nhật Python cho bản sửa webcam này, không cần nạp firmware lại nếu đã protocol3.
+Chưa kiểm chứng DirectShow trên webcam Windows thật của nhóm; các test dùng capture giả lập.

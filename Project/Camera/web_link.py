@@ -10,7 +10,20 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib import request
+from urllib import request, error
+
+
+def describe_http_error(exc):
+    if isinstance(exc, error.HTTPError):
+        hint = {401: "API key không khớp backend thử nghiệm", 403: "Backend từ chối quyền truy cập",
+                404: "Không có API này: kiểm tra đúng backend thử nghiệm", 400: "Dữ liệu/config không đúng: kiểm tra AUTO và firmware protocol 3",
+                409: "Trạng thái đã thay đổi; tải lại và kiểm tra lượt đang chờ"}.get(exc.code, "Backend trả lỗi")
+        return f"HTTP {exc.code}: {hint}"
+    if isinstance(exc, error.URLError):
+        reason = exc.reason
+        code = getattr(reason, 'winerror', None) or getattr(reason, 'errno', None)
+        return f"URLError: {type(reason).__name__}" + (f" ({code})" if code else "")
+    return str(exc) if isinstance(exc, ValueError) else type(exc).__name__
 
 
 def load_settings():
@@ -53,6 +66,16 @@ class HttpLink:
                 return None
 
         self.opener = request.build_opener(request.ProxyHandler({}), NoRedirect())
+
+    def verify_experiment(self):
+        state = self.call("/api/access/status")
+        stats = state.get("stats", {})
+        if stats.get("capacity") != 1 or "pendingParking" not in stats:
+            raise ValueError("Đang trỏ backend bản gốc. Sửa DEVICE_BACKEND_URL tới IP máy web cổng 18081 và dùng API key thử nghiệm.")
+        if self.direction != "AUTO":
+            raise ValueError("Bản thử nghiệm cần PARKING_DIRECTION=AUTO trong Camera/.env")
+        return state
+
 
     def call(self, path, body=None):
         data = None if body is None else json.dumps(body).encode("utf-8")
@@ -161,7 +184,7 @@ class PlateUploader:
                 offline = False
             except Exception as exc:
                 if not offline:
-                    print(f"[HTTP CAMERA] Chưa kết nối được Web Backend ({type(exc).__name__}). Đang thử lại...", flush=True)
+                    print(f"[HTTP CAMERA] Chưa kết nối được Web Backend ({describe_http_error(exc)}). Đang thử lại...", flush=True)
                     offline = True
 
     def close(self):
@@ -178,6 +201,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     link = HttpLink()
+    link.verify_experiment()
     if args.register or args.disable:
         plate = args.register or args.disable
         res = link.call("/api/device/registered-plates", {"plate": plate, "enabled": bool(args.register)})

@@ -6,7 +6,7 @@ import json
 import threading
 import time
 from urllib import request, parse
-from web_link import HttpLink, load_settings
+from web_link import HttpLink, load_settings, describe_http_error
 
 
 class GatePlan:
@@ -176,9 +176,9 @@ class GateLinkRunner:
             except Exception as exc:
                 connected = False
                 # Never replay a backend request seen before the first successful poll.
-                error = (stage, type(exc).__name__)
+                error = (stage, describe_http_error(exc))
                 if error != last_error:
-                    detail = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
+                    detail = describe_http_error(exc)
                     print(f"[GATE LINK] Error at {stage}: {detail}", flush=True)
                     last_error = error
                 self.stop_event.wait(1.5)
