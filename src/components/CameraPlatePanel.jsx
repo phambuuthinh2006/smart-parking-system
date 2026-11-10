@@ -43,7 +43,6 @@ export default function CameraPlatePanel() {
     refresh();
     return () => { active = false; clearTimeout(timer); controller?.abort(); };
   }, []);
-
   async function handleRegister(e) {
     e.preventDefault();
     const clean = newPlate.trim();
@@ -216,7 +215,7 @@ export default function CameraPlatePanel() {
         </div>
 
         <p className="camera-footnote">
-          Tự động: camera gửi biển → backend duyệt (nếu Hoạt động) → Uno mở barrier. Nếu biển bị "Tạm khoá" hoặc chưa đăng ký, hệ thống từ chối mở cổng.
+          Chế độ tự động (AUTO): xe qua cổng nhận diện biển → kiểm tra đăng ký → barrier mở. Cảm biến ô đỗ xác nhận vị trí Inside; khi rời ô và qua cổng ra, hệ thống tự động check-out (Exited).
         </p>
       </div>
     </section>

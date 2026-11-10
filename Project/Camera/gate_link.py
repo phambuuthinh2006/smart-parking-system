@@ -6,7 +6,7 @@ import json
 import threading
 import time
 from urllib import request, parse
-from web_link import HttpLink, load_settings
+from web_link import HttpLink, load_settings, describe_http_error
 
 
 class GatePlan:
@@ -76,8 +76,8 @@ def read_hardware(opener, esp_url, key=""):
     req = request.Request(esp_url.rstrip("/") + "/status", headers={"X-Device-Key": key})
     with opener.open(req, timeout=2.5) as response:
         status = json.load(response)
-    if status.get("protocolVersion") != 2:
-        raise ValueError("Upload the new Uno + ESP8266 firmware (protocolVersion 2)")
+    if status.get("protocolVersion") != 3:
+        raise ValueError("Upload the new Uno + ESP8266 firmware (experimental protocolVersion 3)")
     age = status.get("sampleAgeMs")
     if status.get("telemetryValid") is not True or type(age) is not int or not 0 <= age <= 2000:
         raise ValueError("Uno telemetry is missing or stale; check UART and both firmwares")
@@ -85,6 +85,8 @@ def read_hardware(opener, esp_url, key=""):
         "IDLE", "WAITING", "OPEN", "PASSED", "CANCELLED", "BLOCKED"
     ):
         raise ValueError("Invalid gate telemetry")
+    if status.get("slot") not in ("AVAILABLE", "OCCUPIED", "UNKNOWN") or type(status.get("gatePresent")) is not bool or type(status.get("gateSensorValid")) is not bool or type(status.get("slotSensorValid")) is not bool:
+        raise ValueError("Protocol 3 sensor fields are missing")
     return status
 
 
@@ -99,7 +101,9 @@ class AutomaticCycle:
         return {"requestId": hardware.get("requestId") or None,
                 "expectedVersion": b["version"], "visitId": b.get("pendingVisitId"),
                 "gate": hardware["gate"], "phase": hardware["phase"],
-                "sampleAgeMs": hardware["sampleAgeMs"]}
+                "sampleAgeMs": hardware["sampleAgeMs"],
+                "slotStatus": hardware["slot"] if hardware["slotSensorValid"] else "UNKNOWN",
+                "gatePresent": hardware["gatePresent"], "gateSensorValid": hardware["gateSensorValid"]}
 
     def opening(self, state, hardware, command, now):
         b = state["barrier"]
@@ -154,7 +158,7 @@ class GateLinkRunner:
                     stage = "backend /device/barrier-feedback"
                     result = self.backend.call("/api/device/barrier-feedback", self.auto.feedback(state, physical))
                     self.auto.last_feedback = now
-                    if result.get("outcome") in ("AUTO_PASSAGE_CONFIRMED", "AUTO_CANCELLED_CLOSE"):
+                    if result.get("outcome") in ("GATE_ENTERED", "AUTO_PASSAGE_CONFIRMED", "AUTO_CANCELLED_CLOSE"):
                         print(f"[GATE LINK] {result['outcome']}: visit synchronized automatically", flush=True)
                     state = result["snapshot"]["access"]
                     if state["barrier"]["version"] != observed_version:
@@ -172,9 +176,9 @@ class GateLinkRunner:
             except Exception as exc:
                 connected = False
                 # Never replay a backend request seen before the first successful poll.
-                error = (stage, type(exc).__name__)
+                error = (stage, describe_http_error(exc))
                 if error != last_error:
-                    detail = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
+                    detail = describe_http_error(exc)
                     print(f"[GATE LINK] Error at {stage}: {detail}", flush=True)
                     last_error = error
                 self.stop_event.wait(1.5)

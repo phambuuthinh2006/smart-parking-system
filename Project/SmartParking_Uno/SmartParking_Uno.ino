@@ -13,6 +13,7 @@
 #include <Servo.h>
 #include <SoftwareSerial.h>
 #include "GateCycle.h"
+#include "SlotSensor.h"
 
 // ================= PIN CONFIGURATION =================
 
@@ -89,6 +90,7 @@ enum GateState {
 
 GateState gateState = GATE_CLOSED_STATE;
 GateCycle gateCycle;
+SlotSensor slotSensor;
 
 // Cờ ghi nhận yêu cầu mở từ Web
 bool webOpenRequested = false;
@@ -256,7 +258,13 @@ void sendStatusToEsp() {
   espSerial.print(F(","));
   espSerial.print(gateCycle.distance, 1);
   espSerial.print(F(","));
-  espSerial.println(gateCycle.valid ? "1" : "0");
+  espSerial.print(gateCycle.valid ? "1" : "0");
+  espSerial.print(F(","));
+  espSerial.print(slotSensor.status);
+  espSerial.print(F(","));
+  espSerial.print(gateCycle.present ? "1" : "0");
+  espSerial.print(F(","));
+  espSerial.println(slotSensor.valid ? "1" : "0");
 }
 
 
@@ -306,7 +314,7 @@ void setup() {
   digitalWrite(BUZZER_PIN, LOW);
 
   Serial.println(F("========================================="));
-  Serial.println(F("   SMART PARKING - ARDUINO UNO R3 READY  "));
+  Serial.println(F("   SMART PARKING - UNO EXPERIMENT PROTOCOL 3 READY  "));
   Serial.println(F("========================================="));
 }
 
@@ -330,7 +338,8 @@ void loop() {
     // 3. KIỂM TRA CHỖ ĐỖ XE (SLOT 1)
     // --------------------------------
     slotDistance = readDistance();
-    slotOccupied = (slotDistance > 0 && slotDistance < SLOT_THRESHOLD);
+    slotSensor.sample(slotDistance);
+    slotOccupied = strcmp(slotSensor.status, "OCCUPIED") == 0;
 
     // --------------------------------
     // 4. KIỂM TRA ÁNH SÁNG (LDR HYSTERESIS)

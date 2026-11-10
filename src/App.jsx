@@ -32,7 +32,7 @@ import { STATUSES } from "./services/parking";
 export default function App() {
   const simulation = useParking();
   const [simulationFireGate, setSimulationFireGate] = useState(false);
-  const [mode, setMode] = useState("simulation");
+  const [mode, setMode] = useState("device");
   const device = useDeviceParking(mode === "device");
   const isDevice = mode === "device";
   const parking = isDevice ? device : simulation;
@@ -90,7 +90,7 @@ export default function App() {
               <h1>
                 Smart Parking <span>Dashboard</span>
               </h1>
-              <p>Real-time Parking Monitoring</p>
+              <p>THỬ NGHIỆM · Một xe / một ô · database riêng</p>
             </div>
           </a>
           <div className="header-status">

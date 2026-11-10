@@ -64,13 +64,13 @@ class ParkingIntegrationTest {
 
   @BeforeEach
   void reset() {
-    db.update("UPDATE barrier_hardware SET position='UNKNOWN',phase='IDLE',request_id=NULL,last_seen_at=NULL");
+    db.update("UPDATE barrier_hardware SET position='UNKNOWN',phase='IDLE',request_id=NULL,last_seen_at=NULL,gate_present=false,gate_sensor_valid=false");
     db.execute("TRUNCATE registered_plate");
     db.update("UPDATE camera_latest SET event_id=NULL,plate_text=NULL,plate=NULL,outcome=NULL,received_at=NULL WHERE id=1");
     for (String plate : List.of("43A12345", "43A99999", "43A12340", "43A12341", "43A12342", "43A12343"))
       db.update("INSERT INTO registered_plate(plate) VALUES(?)", plate);
     db.execute(
-      "TRUNCATE vehicle_access_event, vehicle_visit, virtual_barrier RESTART IDENTITY"
+      "TRUNCATE camera_encounter, vehicle_access_event, vehicle_visit, virtual_barrier RESTART IDENTITY"
     );
     db.update("INSERT INTO virtual_barrier(id) VALUES(1)");
     db.execute(
@@ -617,11 +617,17 @@ class ParkingIntegrationTest {
       false
     );
     assertThat(response.getStatusCode().value()).isEqualTo(200);
-    return response.getBody();
+    var result = response.getBody();
+    if (result.snapshot().access().stats().pendingParking() > 0) {
+      post("status", report(Status.AVAILABLE), KEY);
+      post("status", report(Status.OCCUPIED), KEY);
+      return new AccessData.Result(result.outcome(), result.visitId(), result.duplicate(), service.snapshot());
+    }
+    return result;
   }
 
   private AccessData.HardwareReport feedback(AccessData.Barrier barrier, String phase, String gate) {
-    return new AccessData.HardwareReport(barrier.requestId(), barrier.version(), barrier.pendingVisitId(), gate, phase, 100);
+    return new AccessData.HardwareReport(barrier.requestId(), barrier.version(), barrier.pendingVisitId(), gate, phase, 100, Status.AVAILABLE, true, true);
   }
 
   @Test
@@ -634,12 +640,14 @@ class ParkingIntegrationTest {
     assertThat(opened.snapshot().access().stats().pendingEntry()).isEqualTo(1);
     assertThat(opened.snapshot().access().barrier().actualPosition()).isEqualTo("OPEN");
     var completed = accessPost("/api/device/barrier-feedback", done, true).getBody();
-    assertThat(completed.outcome()).isEqualTo("AUTO_PASSAGE_CONFIRMED");
-    assertThat(completed.snapshot().access().stats().inside()).isEqualTo(1);
+    assertThat(completed.outcome()).isEqualTo("GATE_ENTERED");
+    assertThat(completed.snapshot().access().stats().inside()).isZero();
+    assertThat(completed.snapshot().access().stats().pendingParking()).isEqualTo(1);
     assertThat(completed.snapshot().access().barrier().position()).isEqualTo("CLOSED");
     var duplicate = accessPost("/api/device/barrier-feedback", done, true).getBody();
     assertThat(duplicate.duplicate()).isTrue();
     assertThat(db.queryForObject("SELECT count(*) FROM vehicle_access_event WHERE source='DEVICE'", Integer.class)).isEqualTo(1);
+    post("status", report(Status.OCCUPIED), KEY);
     var exit = detect(detection("43A-123.45", AccessData.Direction.EXIT));
     // Old retained telemetry must not finish a new cycle.
     accessPost("/api/device/barrier-feedback", done, true);
@@ -652,9 +660,9 @@ class ParkingIntegrationTest {
   @Test
   void hardwareRejectsWrongCycleStaleSamplesAndNeverCountsBlockedOrTimeoutAsPassage() {
     var b = detect(detection("43A-123.45", AccessData.Direction.ENTRY)).snapshot().access().barrier();
-    var wrong = new AccessData.HardwareReport(UUID.randomUUID(), b.version(), b.pendingVisitId(), "CLOSED", "PASSED", 100);
+    var wrong = new AccessData.HardwareReport(UUID.randomUUID(), b.version(), b.pendingVisitId(), "CLOSED", "PASSED", 100, Status.AVAILABLE, true, true);
     assertThat(accessPost("/api/device/barrier-feedback", wrong, true).getBody().outcome()).isEqualTo("STALE_CYCLE");
-    var stale = new AccessData.HardwareReport(b.requestId(), b.version(), b.pendingVisitId(), "CLOSED", "PASSED", 2001);
+    var stale = new AccessData.HardwareReport(b.requestId(), b.version(), b.pendingVisitId(), "CLOSED", "PASSED", 2001, Status.AVAILABLE, true, true);
     assertThat(accessPost("/api/device/barrier-feedback", stale, true).getStatusCode().is4xxClientError()).isTrue();
     accessPost("/api/device/barrier-feedback", feedback(b, "BLOCKED", "OPEN"), true);
     assertThat(service.snapshot().access().stats().inside()).isZero();
@@ -665,6 +673,106 @@ class ParkingIntegrationTest {
     assertThat(cancelled.snapshot().access().visits().get(0).entryAt()).isNull();
     db.update("UPDATE barrier_hardware SET last_seen_at=now()-interval '10 seconds'");
     assertThat(service.snapshot().access().barrier().hardwareConnected()).isFalse();
+  }
+
+  private CameraController.Latest autoRead(String plate, UUID encounter) {
+    var headers = new HttpHeaders(); headers.set("X-Device-Key", KEY);
+    var response = http.postForEntity("/api/device/plate-readings",
+      new HttpEntity<>(new CameraController.Reading(UUID.randomUUID(), plate, AccessData.Direction.AUTO, Instant.now(), encounter), headers), CameraController.Latest.class);
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+    return response.getBody();
+  }
+
+  private AccessData.Result sensors(Status slot, boolean gatePresent) {
+    var b = service.snapshot().access().barrier();
+    return accessPost("/api/device/barrier-feedback", new AccessData.HardwareReport(null, b.version(), b.pendingVisitId(), "CLOSED", "IDLE", 10, slot, gatePresent, true), true).getBody();
+  }
+
+  @Test
+  void experimentEntryIsInsideOnlyAtSlotAndAutoExitRequiresANewEncounter() {
+    sensors(Status.AVAILABLE, true);
+    UUID firstEncounter = UUID.randomUUID();
+    assertThat(autoRead("43A-123.45", firstEncounter).outcome()).isEqualTo("ENTRY_PENDING");
+    var b = service.snapshot().access().barrier();
+    var crossed = accessPost("/api/device/barrier-feedback", feedback(b, "PASSED", "CLOSED"), true).getBody();
+    assertThat(crossed.outcome()).isEqualTo("GATE_ENTERED");
+    assertThat(crossed.snapshot().access().stats().inside()).isZero();
+    assertThat(crossed.snapshot().access().visits().get(0).status()).isEqualTo("PENDING_PARKING");
+    assertThat(crossed.snapshot().access().visits().get(0).entryAt()).isNull();
+    assertThat(autoRead("43A12345", firstEncounter).outcome()).isEqualTo("ENCOUNTER_USED");
+    assertThat(autoRead("43A12345", UUID.randomUUID()).outcome()).isEqualTo("WAITING_PARKING");
+    sensors(Status.UNKNOWN, true);
+    assertThat(service.snapshot().access().stats().inside()).isZero();
+    // A previously confirmed clear slot can recover from UNKNOWN with a fresh valid occupied sample.
+    sensors(Status.OCCUPIED, true);
+    assertThat(service.snapshot().access().stats().inside()).isEqualTo(1);
+    sensors(Status.AVAILABLE, true);
+    sensors(Status.OCCUPIED, true);
+    assertThat(service.snapshot().access().stats().inside()).isEqualTo(1);
+    assertThat(service.snapshot().access().visits().get(0).entryAt()).isNotNull();
+    sensors(Status.OCCUPIED, true);
+    assertThat(db.queryForObject("SELECT count(*) FROM vehicle_access_event WHERE outcome='SLOT_PARKED'", Integer.class)).isEqualTo(1);
+    assertThat(autoRead("43A12345", UUID.randomUUID()).outcome()).isEqualTo("SLOT_STILL_OCCUPIED");
+    sensors(Status.AVAILABLE, true);
+    assertThat(service.snapshot().access().stats().inside()).isEqualTo(1);
+    assertThat(service.snapshot().access().visits().get(0).slotLeftAt()).isNotNull();
+    assertThat(autoRead("43A12345", firstEncounter).outcome()).isEqualTo("ENCOUNTER_USED");
+    UUID secondEncounter = UUID.randomUUID();
+    assertThat(autoRead("43A12345", secondEncounter).outcome()).isEqualTo("EXIT_PENDING");
+    var exit = service.snapshot().access().barrier();
+    assertThat(exit.direction()).isEqualTo("EXIT");
+    accessPost("/api/device/barrier-feedback", feedback(exit, "PASSED", "CLOSED"), true);
+    assertThat(service.snapshot().access().stats().exited()).isEqualTo(1);
+    assertThat(service.snapshot().access().stats().inside()).isZero();
+    assertThat(autoRead("43A12345", secondEncounter).outcome()).isEqualTo("ENCOUNTER_USED");
+    assertThat(autoRead("43A12345", UUID.randomUUID()).outcome()).isEqualTo("ENTRY_PENDING");
+  }
+
+  @Test
+  void experimentDoesNotGuessVehicleFromOldOrOrphanSlotOccupancy() {
+    sensors(Status.OCCUPIED, true);
+    assertThat(service.snapshot().access().visits()).isEmpty();
+    assertThat(autoRead("43A12345", UUID.randomUUID()).outcome()).isEqualTo("SLOT_NOT_READY");
+    // Even an operator entry cannot use an occupied slot sample from before crossing.
+    var b = detect(detection("43A12345", AccessData.Direction.ENTRY)).snapshot().access().barrier();
+    var sameOccupied = new AccessData.HardwareReport(b.requestId(), b.version(), b.pendingVisitId(), "CLOSED", "PASSED", 10, Status.OCCUPIED, true, true);
+    accessPost("/api/device/barrier-feedback", sameOccupied, true);
+    sensors(Status.OCCUPIED, true);
+    assertThat(service.snapshot().access().stats().inside()).isZero();
+    assertThat(service.snapshot().access().stats().pendingParking()).isEqualTo(1);
+    sensors(Status.AVAILABLE, true); sensors(Status.OCCUPIED, true);
+    assertThat(service.snapshot().access().stats().inside()).isEqualTo(1);
+  }
+
+  @Test
+  void experimentAutoWaitsForFreshGateAndSlotTelemetryWithoutConsumingEncounter() {
+    UUID encounter = UUID.randomUUID();
+    assertThat(autoRead("43A12345", encounter).outcome()).isEqualTo("WAITING_GATE_SENSOR");
+    sensors(Status.AVAILABLE, false);
+    assertThat(autoRead("43A12345", encounter).outcome()).isEqualTo("WAITING_GATE_SENSOR");
+    sensors(Status.AVAILABLE, true);
+    db.update("UPDATE barrier_hardware SET last_seen_at=now()-interval '10 seconds'");
+    assertThat(autoRead("43A12345", encounter).outcome()).isEqualTo("WAITING_GATE_SENSOR");
+    sensors(Status.AVAILABLE, true);
+    assertThat(autoRead("43A12345", encounter).outcome()).isEqualTo("ENTRY_PENDING");
+    var b = service.snapshot().access().barrier();
+    accessPost("/api/device/barrier-feedback", feedback(b, "PASSED", "CLOSED"), true);
+    assertThat(autoRead("43A99999", UUID.randomUUID()).outcome()).isEqualTo("CAPACITY_REACHED");
+    assertThat(service.snapshot().access().visits()).hasSize(1);
+  }
+
+  @Test
+  void experimentConcurrentOcrForOneEncounterOnlyOpensOnce() throws Exception {
+    sensors(Status.AVAILABLE, true);
+    UUID encounter = UUID.randomUUID();
+    try (var pool = new Pool(Executors.newFixedThreadPool(4))) {
+      var tasks = new ArrayList<Future<?>>();
+      for (int i=0; i<10; i++) tasks.add(pool.executor.submit(() -> autoRead("43A12345", encounter)));
+      for (var task: tasks) task.get(10, TimeUnit.SECONDS);
+    }
+    assertThat(service.snapshot().access().visits()).hasSize(1);
+    assertThat(service.snapshot().access().barrier().version()).isEqualTo(1);
+    assertThat(db.queryForObject("SELECT count(*) FROM camera_encounter", Integer.class)).isEqualTo(1);
   }
 
   @Test
@@ -808,15 +916,12 @@ class ParkingIntegrationTest {
 
   @Test
   void accessLedgerCapacityCountsPendingEntryWithoutInventingParkingSlot() {
-    for (int i = 0; i < 4; i++) {
-      var entry = detect(detection("43A1234" + i, AccessData.Direction.ENTRY));
-      passage(entry.snapshot().access().barrier().version());
-    }
-    assertThat(
-      detect(detection("43A99999", AccessData.Direction.ENTRY)).outcome()
-    ).isEqualTo("CAPACITY_REACHED");
-    assertThat(service.snapshot().access().stats().inside()).isEqualTo(4);
-    assertThat(service.snapshot().stats().unknown()).isEqualTo(4);
+    var entry = detect(detection("43A12340", AccessData.Direction.ENTRY));
+    passage(entry.snapshot().access().barrier().version());
+    assertThat(detect(detection("43A99999", AccessData.Direction.ENTRY)).outcome()).isEqualTo("CAPACITY_REACHED");
+    assertThat(service.snapshot().access().stats().inside()).isEqualTo(1);
+    assertThat(service.snapshot().stats().occupied()).isEqualTo(1);
+
   }
 
   @Test

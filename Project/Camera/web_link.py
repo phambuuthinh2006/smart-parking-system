@@ -10,7 +10,20 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib import request
+from urllib import request, error
+
+
+def describe_http_error(exc):
+    if isinstance(exc, error.HTTPError):
+        hint = {401: "API key không khớp backend thử nghiệm", 403: "Backend từ chối quyền truy cập",
+                404: "Không có API này: kiểm tra đúng backend thử nghiệm", 400: "Dữ liệu/config không đúng: kiểm tra AUTO và firmware protocol 3",
+                409: "Trạng thái đã thay đổi; tải lại và kiểm tra lượt đang chờ"}.get(exc.code, "Backend trả lỗi")
+        return f"HTTP {exc.code}: {hint}"
+    if isinstance(exc, error.URLError):
+        reason = exc.reason
+        code = getattr(reason, 'winerror', None) or getattr(reason, 'errno', None)
+        return f"URLError: {type(reason).__name__}" + (f" ({code})" if code else "")
+    return str(exc) if isinstance(exc, ValueError) else type(exc).__name__
 
 
 def load_settings():
@@ -42,17 +55,27 @@ def load_settings():
 class HttpLink:
     def __init__(self):
         config = load_settings()
-        self.base = config.get("DEVICE_BACKEND_URL", "http://192.168.4.2:18080").rstrip("/")
+        self.base = config.get("DEVICE_BACKEND_URL", "http://192.168.4.2:18081").rstrip("/")
         self.key = config.get("DEVICE_API_KEY", "")
-        self.direction = config.get("PARKING_DIRECTION", "ENTRY")
-        if self.direction not in ("ENTRY", "EXIT"):
-            self.direction = "ENTRY"
+        self.direction = config.get("PARKING_DIRECTION", "AUTO")
+        if self.direction not in ("AUTO", "ENTRY", "EXIT"):
+            raise ValueError("PARKING_DIRECTION must be AUTO, ENTRY or EXIT")
 
         class NoRedirect(request.HTTPRedirectHandler):
             def redirect_request(self, *args):
                 return None
 
         self.opener = request.build_opener(request.ProxyHandler({}), NoRedirect())
+
+    def verify_experiment(self):
+        state = self.call("/api/access/status")
+        stats = state.get("stats", {})
+        if stats.get("capacity") != 1 or "pendingParking" not in stats:
+            raise ValueError("Đang trỏ backend bản gốc. Sửa DEVICE_BACKEND_URL tới IP máy web cổng 18081 và dùng API key thử nghiệm.")
+        if self.direction != "AUTO":
+            raise ValueError("Bản thử nghiệm cần PARKING_DIRECTION=AUTO trong Camera/.env")
+        return state
+
 
     def call(self, path, body=None):
         data = None if body is None else json.dumps(body).encode("utf-8")
@@ -70,6 +93,30 @@ class HttpLink:
             return json.load(response)
 
 
+class CameraEncounter:
+    """No new encounter until consecutive observed empty frames span two seconds.
+
+    Uses plate REGION presence, not OCR success, so OCR noise is not a departure.
+    """
+    def __init__(self):
+        self.id = str(uuid.uuid4())
+        self.empty_since = None
+        self.cleared = False
+
+    def observe(self, present, now):
+        if present:
+            if self.cleared:
+                self.id = str(uuid.uuid4())
+            self.empty_since = None
+            self.cleared = False
+        else:
+            if self.empty_since is None:
+                self.empty_since = now
+            elif now-self.empty_since >= 2:
+                self.cleared = True
+        return self.id
+
+
 class PlateUploader:
     def __init__(self, link=None):
         self.link = link or HttpLink()
@@ -79,8 +126,12 @@ class PlateUploader:
         self.last_at = 0
         self.recent = {}
         self.last_result = None
+        self.encounter = CameraEncounter()
         self.thread = threading.Thread(target=self._send_loop, daemon=True)
         self.thread.start()
+
+    def observe_frame(self, plate_region_present):
+        return self.encounter.observe(plate_region_present, time.monotonic())
 
     def submit(self, text):
         """Gửi biển số đọc được vào hàng đợi với cơ chế chống spam (cooldown 3s cùng 1 biển)."""
@@ -98,6 +149,7 @@ class PlateUploader:
             "eventId": str(uuid.uuid4()),
             "plateText": text,
             "direction": self.link.direction,
+            "encounterId": self.encounter.id,
             "observedAt": datetime.now(timezone.utc).isoformat()
         }
 
@@ -132,7 +184,7 @@ class PlateUploader:
                 offline = False
             except Exception as exc:
                 if not offline:
-                    print(f"[HTTP CAMERA] Chưa kết nối được Web Backend ({type(exc).__name__}). Đang thử lại...", flush=True)
+                    print(f"[HTTP CAMERA] Chưa kết nối được Web Backend ({describe_http_error(exc)}). Đang thử lại...", flush=True)
                     offline = True
 
     def close(self):
@@ -149,6 +201,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     link = HttpLink()
+    link.verify_experiment()
     if args.register or args.disable:
         plate = args.register or args.disable
         res = link.call("/api/device/registered-plates", {"plate": plate, "enabled": bool(args.register)})
@@ -158,6 +211,7 @@ if __name__ == "__main__":
             "eventId": str(uuid.uuid4()),
             "plateText": args.send,
             "direction": link.direction,
+            "encounterId": str(uuid.uuid4()),
             "observedAt": datetime.now(timezone.utc).isoformat()
         })
         print(f"Kết quả gửi biển '{args.send}': {res.get('outcome')}")

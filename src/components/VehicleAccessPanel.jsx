@@ -166,6 +166,8 @@ export default function VehicleAccessPanel({
               ? "Fire override: virtual barrier held open."
               : barrier.pendingPlate
                 ? `${barrier.pendingPlate} · ${barrier.direction === "ENTRY" ? "waiting to enter" : "waiting to exit"}`
+                : (state.stats.pendingParking || 0) > 0
+                  ? "Xe đã qua cổng; chờ cảm biến P01 xác nhận vào ô."
                 : barrier.position === "UNKNOWN"
                   ? "Waiting for backend confirmation."
                   : "Ready for the next detection."}
@@ -183,6 +185,7 @@ export default function VehicleAccessPanel({
             <span>
               <strong>{state.stats.pendingEntry}</strong> awaiting entry
             </span>
+            <span><strong>{state.stats.pendingParking || 0}</strong> chờ vào ô</span>
             <span>
               <strong>{state.stats.capacity}</strong> visit capacity
             </span>
@@ -290,9 +293,10 @@ export default function VehicleAccessPanel({
               <span className="access-error">{error}</span>
             ) : (
               info ||
-              (simulation ? "Recognition queues a visit. Confirm passage only after the simulated car crosses." : "Camera tạo yêu cầu mới; phản hồi chu kỳ từ Uno tự ghi lượt. Các nút thủ công chỉ dùng khi xử lý sự cố.")
+              (simulation ? "Recognition queues a visit. Confirm passage only after the simulated car crosses." : "Qua cổng → chờ vào ô. Chỉ cảm biến P01 có xe mới ghi Inside; lượt ra hoàn tất ở cổng.")
             )}
           </div>
+          {simulation && (state.stats.pendingParking || 0) > 0 && <button className="access-reset" onClick={() => act("PARKED")}>Mô phỏng P01 có xe → Inside</button>}
           {simulation && (
             <button
               className="access-reset"
@@ -328,7 +332,7 @@ export default function VehicleAccessPanel({
               <tr>
                 <th>PLATE</th>
                 <th>VISIT STATUS</th>
-                <th>ENTRY</th>
+                <th>VÀO Ô (INSIDE)</th>
                 <th>EXIT</th>
                 <th>SOURCE</th>
               </tr>
