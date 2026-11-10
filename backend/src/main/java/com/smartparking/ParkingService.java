@@ -143,6 +143,13 @@ public class ParkingService {
   }
 
   @Transactional
+  public void deletePlate(String plate) {
+    lockDevice();
+    String normalized = AccessStore.normalizePlate(plate);
+    db.update("DELETE FROM registered_plate WHERE plate=?", normalized);
+  }
+
+  @Transactional
   public CameraController.Latest cameraReading(CameraController.Reading reading) {
     lockDevice();
     String raw = reading.plateText().trim();

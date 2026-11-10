@@ -1004,4 +1004,30 @@ class ParkingIntegrationTest {
     http.postForEntity("/api/device/registered-plates", new HttpEntity<>(new CameraController.Registration("43A12345", false), headers), String.class);
     assertThat(detect(detection("43A12345", AccessData.Direction.EXIT)).outcome()).isEqualTo("NOT_REGISTERED");
   }
+
+  @Test
+  void webCanRegisterToggleAndRemovePlatesWithoutDeviceKey() {
+    // 1. Web registration without X-Device-Key
+    var reg = http.postForEntity("/api/camera/registered-plates", new CameraController.Registration("36H-123.45", true), CameraController.Registered.class);
+    assertThat(reg.getStatusCode().value()).isEqualTo(200);
+    assertThat(reg.getBody().plate()).isEqualTo("36H12345");
+    assertThat(reg.getBody().enabled()).isTrue();
+
+    // Verify in GET list
+    var list = http.getForObject("/api/camera/registered-plates", CameraController.Registered[].class);
+    assertThat(list).extracting(CameraController.Registered::plate).contains("36H12345");
+
+    // 2. Toggle lock (enabled: false) from Web
+    var lock = http.postForEntity("/api/camera/registered-plates", new CameraController.Registration("36H-123.45", false), CameraController.Registered.class);
+    assertThat(lock.getStatusCode().value()).isEqualTo(200);
+    assertThat(lock.getBody().enabled()).isFalse();
+
+    var listAfterLock = http.getForObject("/api/camera/registered-plates", CameraController.Registered[].class);
+    assertThat(listAfterLock).filteredOn(r -> r.plate().equals("36H12345")).extracting(CameraController.Registered::enabled).containsExactly(false);
+
+    // 3. Delete from Web
+    http.delete("/api/camera/registered-plates/36H-123.45");
+    var listAfterDelete = http.getForObject("/api/camera/registered-plates", CameraController.Registered[].class);
+    assertThat(listAfterDelete).extracting(CameraController.Registered::plate).doesNotContain("36H12345");
+  }
 }

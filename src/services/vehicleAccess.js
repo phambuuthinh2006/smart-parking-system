@@ -4,6 +4,20 @@ export const normalizePlate = (value) =>
     .replace(/[\s.-]/g, "");
 export const validPlate = (value) =>
   /^[0-9]{2}[A-Z]{1,2}[0-9]{4,6}$/.test(normalizePlate(value));
+export const formatPlateDisplay = (plate) => {
+  if (!plate) return "";
+  const clean = normalizePlate(plate);
+  const match = clean.match(/^([0-9]{2}[A-Z]{1,2})([0-9]{4,6})$/);
+  if (match) {
+    const head = match[1];
+    const tail = match[2];
+    if (tail.length === 5) {
+      return `${head}-${tail.slice(0, 3)}.${tail.slice(3)}`;
+    }
+    return `${head}-${tail}`;
+  }
+  return plate;
+};
 export const activeVisit = (visit) =>
   ["PENDING_ENTRY", "INSIDE", "PENDING_EXIT"].includes(visit.status);
 export const visitLabel = (status) =>

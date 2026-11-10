@@ -5,6 +5,7 @@ import {
   localAccessAction,
   validPlate,
   parseAccess,
+  formatPlateDisplay,
 } from "../src/services/vehicleAccess.js";
 const detect = (state, plate, direction = "ENTRY") =>
   localAccessAction(state, { kind: "DETECTION", plate, direction }).state;
@@ -61,4 +62,12 @@ test("hardware feedback and DEVICE passage events are accepted without inventing
   assert.equal(parseAccess(state).barrier.actualPosition, "OPEN");
   state.barrier.actualPosition = "made-up";
   assert.throws(() => parseAccess(state), /Invalid/);
+});
+
+test("formatPlateDisplay formats standard Vietnamese plates cleanly", () => {
+  assert.equal(formatPlateDisplay("36H12345"), "36H-123.45");
+  assert.equal(formatPlateDisplay("43A99999"), "43A-999.99");
+  assert.equal(formatPlateDisplay("29B1234"), "29B-1234");
+  assert.equal(formatPlateDisplay("51LD12345"), "51LD-123.45");
+  assert.equal(formatPlateDisplay(""), "");
 });

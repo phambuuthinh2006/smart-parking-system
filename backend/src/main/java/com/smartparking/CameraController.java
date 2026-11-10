@@ -35,6 +35,16 @@ public class CameraController {
     return db.query("SELECT plate,enabled FROM registered_plate ORDER BY plate", (r,n)->new Registered(r.getString(1),r.getBoolean(2)));
   }
 
+  @PostMapping("/camera/registered-plates")
+  public Registered registerFromWeb(@Valid @RequestBody Registration registration) {
+    return parking.registerPlate(registration);
+  }
+
+  @DeleteMapping("/camera/registered-plates/{plate}")
+  public void delete(@PathVariable String plate) {
+    parking.deletePlate(plate);
+  }
+
   // Management uses the configured device key; never ship it to browser bundles.
   @PostMapping("/device/registered-plates")
   public Registered register(@Valid @RequestBody Registration registration) {
