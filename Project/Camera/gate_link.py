@@ -5,7 +5,7 @@ import argparse
 import json
 import threading
 import time
-from urllib import request
+from urllib import request, parse
 from web_link import HttpLink, load_settings
 
 
@@ -47,8 +47,10 @@ class GatePlan:
         return None
 
 
-def send_esp_command(opener, esp_url, command, key=""):
+def send_esp_command(opener, esp_url, command, key="", request_id=None):
     path = "/close" if command == "close" else "/open"
+    if request_id:
+        path += "?" + parse.urlencode({"requestId": request_id})
     headers = {"Content-Type": "application/json"}
     if key:
         headers["X-Device-Key"] = key
@@ -65,7 +67,53 @@ def send_esp_command(opener, esp_url, command, key=""):
     status = result.get("status")
     if status not in ("APPLIED", "COMMAND_RECEIVED"):
         raise ValueError(f"ESP32 phản hồi trạng thái lạ: {status}")
+    if request_id and result.get("requestId") != request_id:
+        raise ValueError("ESP firmware must support correlated requestId (protocol 2)")
     return result
+
+
+def read_hardware(opener, esp_url, key=""):
+    req = request.Request(esp_url.rstrip("/") + "/status", headers={"X-Device-Key": key})
+    with opener.open(req, timeout=2.5) as response:
+        status = json.load(response)
+    if status.get("protocolVersion") != 2:
+        raise ValueError("Upload the new Uno + ESP8266 firmware (protocolVersion 2)")
+    age = status.get("sampleAgeMs")
+    if status.get("telemetryValid") is not True or type(age) is not int or not 0 <= age <= 2000:
+        raise ValueError("Uno telemetry is missing or stale; check UART and both firmwares")
+    if status.get("gate") not in ("OPEN", "CLOSED") or status.get("phase") not in (
+        "IDLE", "WAITING", "OPEN", "PASSED", "CANCELLED", "BLOCKED"
+    ):
+        raise ValueError("Invalid gate telemetry")
+    return status
+
+
+class AutomaticCycle:
+    """Retain a bounded retry only for an idempotent, newly observed command."""
+    def __init__(self):
+        self.pending = None
+        self.last_feedback = 0
+
+    def feedback(self, state, hardware):
+        b = state["barrier"]
+        return {"requestId": hardware.get("requestId") or None,
+                "expectedVersion": b["version"], "visitId": b.get("pendingVisitId"),
+                "gate": hardware["gate"], "phase": hardware["phase"],
+                "sampleAgeMs": hardware["sampleAgeMs"]}
+
+    def opening(self, state, hardware, command, now):
+        b = state["barrier"]
+        if command == "open" and b.get("requestId") and not b.get("fireOverride"):
+            self.pending = (b["requestId"], b["version"], now)
+        if self.pending:
+            token, version, started = self.pending
+            if b["version"] != version or b["position"] != "OPEN" or b.get("fireOverride") or now-started >= 30:
+                self.pending = None
+            elif hardware.get("requestId") == token:
+                self.pending = None  # Uno acknowledged it; never reopen a completed cycle.
+            else:
+                return token
+        return None
 
 
 class GateLinkRunner:
@@ -75,13 +123,14 @@ class GateLinkRunner:
         self.esp_key = config.get("ESP32_API_KEY", "")
         self.backend = backend or HttpLink()
         self.plan = GatePlan()
+        self.auto = AutomaticCycle()
         self.stop_event = threading.Event()
         self.thread = None
 
     def start(self):
         self.thread = threading.Thread(target=self._run_loop, daemon=True)
         self.thread.start()
-        print(f"[GATE LINK] Đã kích hoạt cầu nối Web <-> ESP32 ({self.esp_url})", flush=True)
+        print(f"[GATE LINK] Backend: {self.backend.base}; ESP: {self.esp_url}; automatic cycle feedback enabled", flush=True)
 
     def stop(self):
         self.stop_event.set()
@@ -89,24 +138,48 @@ class GateLinkRunner:
             self.thread.join(timeout=2.0)
 
     def _run_loop(self):
-        offline = False
+        last_error = None
+        connected = False
         while not self.stop_event.is_set():
+            stage = "backend"
             try:
                 state = self.backend.call("/api/access/status")
                 command = self.plan.next(state)
-                if command:
-                    res = send_esp_command(self.backend.opener, self.esp_url, command, self.esp_key)
-                    print(f"\n>>> [GATE LINK] Đã chuyển lệnh '{command.upper()}' sang ESP32! Phản hồi: {res.get('status')}", flush=True)
-                offline = False
+                observed_version = state["barrier"]["version"]
+                self.auto.opening(state, {}, command, time.monotonic())
+                stage = "ESP /status / Uno telemetry"
+                physical = read_hardware(self.backend.opener, self.esp_url, self.esp_key)
+                now = time.monotonic()
+                if now-self.auto.last_feedback >= 1:
+                    stage = "backend /device/barrier-feedback"
+                    result = self.backend.call("/api/device/barrier-feedback", self.auto.feedback(state, physical))
+                    self.auto.last_feedback = now
+                    if result.get("outcome") in ("AUTO_PASSAGE_CONFIRMED", "AUTO_CANCELLED_CLOSE"):
+                        print(f"[GATE LINK] {result['outcome']}: visit synchronized automatically", flush=True)
+                    state = result["snapshot"]["access"]
+                    if state["barrier"]["version"] != observed_version:
+                        command = self.plan.next(state)
+                token = self.auto.opening(state, physical, None, now)
+                stage = "ESP command"
+                if token or (command and (not state["barrier"].get("requestId") or state["barrier"].get("fireOverride"))):
+                    sent = command or "open"
+                    res = send_esp_command(self.backend.opener, self.esp_url, sent, self.esp_key, token)
+                    print(f"\n>>> [GATE LINK] Đã chuyển lệnh '{sent.upper()}' sang ESP32! Phản hồi: {res.get('status')}", flush=True)
+                if not connected:
+                    print("[GATE LINK] Connected: backend + fresh Uno telemetry", flush=True)
+                connected = True
+                last_error = None
             except Exception as exc:
-                self.plan.reset()
-                if not offline:
-                    # In thông báo ngắn gọn khi chưa kết nối được
-                    print(f"[GATE LINK] Đang chờ kết nối Web Backend/ESP32 ({type(exc).__name__})...", flush=True)
-                    offline = True
-                time.sleep(1.5)
+                connected = False
+                # Never replay a backend request seen before the first successful poll.
+                error = (stage, type(exc).__name__)
+                if error != last_error:
+                    detail = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
+                    print(f"[GATE LINK] Error at {stage}: {detail}", flush=True)
+                    last_error = error
+                self.stop_event.wait(1.5)
 
-            time.sleep(0.5)
+            self.stop_event.wait(0.5)
 
 
 def start_gate_link(esp_url=None):

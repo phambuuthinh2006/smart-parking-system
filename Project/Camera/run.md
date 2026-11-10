@@ -1,55 +1,37 @@
-# Hướng dẫn chạy Camera AI & Kết nối Hệ thống Đỗ xe
+# Camera → backend → Uno/ESP: chạy tự động
 
-Hệ thống giữ nguyên toàn bộ mô hình YOLO (`best.pt`), EasyOCR và thuật toán tiền xử lý ảnh.
-Các module HTTP đã được tích hợp chạy ngầm bên trong `main.py`, bạn **chỉ cần chạy đúng 1 lệnh duy nhất**!
+Xem [SETUP.md](../../SETUP.md) để chạy hai laptop, lấy IP, cấu hình key và nạp firmware.
 
----
+## Cập nhật bắt buộc
 
-## 1. Cài đặt thư viện (chỉ cần chạy 1 lần)
-Mở terminal tại thư mục `Project/Camera`:
-```bash
-pip install ultralytics opencv-python easyocr
+- Chép cả thư mục Camera mới, giữ `.env` và model `best.pt` của nhóm.
+- Nạp lại `Project/SmartParking_Uno` (có `GateCycle.h`) và `Project/SmartParking_ESP8266`.
+- `/status` của ESP phải có `protocolVersion:2`, `telemetryValid:true`, `sampleAgeMs<=2000`.
+- Backend phải có API `POST /api/device/barrier-feedback` (migration V6).
+
+## Chạy trên máy camera
+
+```powershell
+python -m pip install ultralytics opencv-python easyocr
+python web_link.py --register "36H-123.45"
+python main.py --source 1
 ```
 
----
+Thay biển ví dụ bằng biển thật. Chỉ chạy main.py, không chạy thêm bridge riêng.
+Giữ đúng IP backend và key trong Camera/.env. Nếu camera lối ra, đặt `PARKING_DIRECTION=EXIT`.
 
-## 2. Cấu hình IP và Key trong file `.env`
-Mở file `Project/Camera/.env` và cập nhật:
-- `DEVICE_BACKEND_URL`: Địa chỉ Backend trên Laptop 1.
-  - Khi cả 2 laptop kết nối vào Wi-Fi ESP32 (`SMART_PARKING_ESP32`), mở Command Prompt trên Laptop 1 gõ `ipconfig` để lấy địa chỉ IPv4 của Wi-Fi (thường là `192.168.4.2`).
-  - Điền: `DEVICE_BACKEND_URL=http://192.168.4.2:18080` (hoặc `http://127.0.0.1:18080` nếu Camera chạy chung trên cùng laptop với Web).
-- `DEVICE_API_KEY`: Lấy chuỗi key từ file `.env` của `smart-parking-system` trên Laptop 1 dán vào đây.
+Backend duyệt biển → Uno thấy xe dưới15cm → mở → cảm biến đo vùng trống hợp lệ
+3lần, sau tối thiểu1.2s → đóng → PASSED đúngrequestId → backend tự ghi lượt.
+Không còn phải bấm Confirm passage trong chu kỳ bình thường. Timeout chờ xe30s
+hủy lượt; sensor không echo giữ cổng, không tính là xe qua. Một sensor chỉ suy
+luận xe rời vùng (xe lùi cũng có thể bị ghi qua) nên chỉ dùng mô hình có giám sát.
 
----
+Các log backend/ESP/telemetry tách riêng. Khi cùng một biển và kết quả không đổi,
+log HTTP được giảm lặp; chuỗi biển chuẩn hóa được gửi tối đa mỗi3giây dù dấu chấm/
+gạch/khoảng trắng OCR thay đổi. Không thay model/OCR hoặc tự tạo confidence.
 
-## 3. Khởi chạy Camera
-Đảm bảo Laptop đã kết nối vào mạng Wi-Fi của ESP32 (`SMART_PARKING_ESP32`).
-Sau đó chạy lệnh:
-```bash
-python main.py
+Kiểm thử không cần webcam/board:
+
+```powershell
+python -m unittest discover -s . -p "test*.py" -v
 ```
-
-### Các tính năng tự động hoạt động:
-1. Mở cửa sổ Webcam quét xe và nhận diện biển số theo thời gian thực.
-2. Khi OCR đọc được biển số, luồng ngầm tự động gửi HTTP POST lên Web Backend.
-3. Luồng Gate Link chạy ngầm tự động lắng nghe lệnh mở cổng từ Web:
-   - Khi Backend duyệt mở cổng -> Gửi tín hiệu sang ESP32.
-   - Khi ESP32 nhận lệnh VÀ cảm biến siêu âm phát hiện có xe phía trước -> Barrier tự động mở.
-   - Khi xe đi qua khỏi tầm cảm biến -> ESP32 tự động đóng barrier!
-4. Nhấn phím `q` trên cửa sổ video để tắt camera an toàn.
-
----
-
-## 4. Công cụ phụ trợ (Tùy chọn)
-- Đăng ký trước một biển số vào hệ thống qua dòng lệnh:
-  ```bash
-  python web_link.py --register "43A-123.45"
-  ```
-- Hủy kích hoạt biển số:
-  ```bash
-  python web_link.py --disable "43A-123.45"
-  ```
-- Thử gửi một biển số lên web kiểm tra mà không cần bật webcam:
-  ```bash
-  python web_link.py --send "43A-123.45"
-  ```

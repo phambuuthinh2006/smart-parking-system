@@ -1,13 +1,30 @@
 import json
 import threading
 import unittest
+import tempfile
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
-from web_link import HttpLink, PlateUploader
+from web_link import HttpLink, PlateUploader, load_settings
 from gate_link import GatePlan, send_esp_command
 
 
 class WebLinkTests(unittest.TestCase):
+    def test_camera_env_overrides_root_and_environment_overrides_both(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            camera = root / 'Project' / 'Camera'
+            camera.mkdir(parents=True)
+            (root / '.env').write_text('DEVICE_BACKEND_URL=http://127.0.0.1:18080\nDEVICE_API_KEY=root-test-key\n')
+            (camera / '.env').write_text('\ufeffDEVICE_BACKEND_URL=http://192.168.4.2:18080\nDEVICE_API_KEY=camera-test-key\n', encoding='utf-8')
+            with patch('web_link.__file__', str(camera / 'web_link.py')), patch.dict('os.environ', {}, clear=True):
+                self.assertEqual(load_settings()['DEVICE_BACKEND_URL'], 'http://192.168.4.2:18080')
+                self.assertEqual(load_settings()['DEVICE_API_KEY'], 'camera-test-key')
+                with patch.dict('os.environ', {'DEVICE_BACKEND_URL': 'http://192.168.4.3:18080'}):
+                    self.assertEqual(load_settings()['DEVICE_BACKEND_URL'], 'http://192.168.4.3:18080')
+                (camera / '.env').unlink()
+                self.assertEqual(load_settings()['DEVICE_API_KEY'], 'root-test-key')
+
     def test_original_ocr_text_sent_over_http(self):
         seen = []
         received = threading.Event()

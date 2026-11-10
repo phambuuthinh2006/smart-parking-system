@@ -39,4 +39,9 @@ public class AccessController {
   public AccessData.State status() {
     return parking.snapshot().access();
   }
+
+  @PostMapping("/device/barrier-feedback")
+  public AccessData.Result hardware(@Valid @RequestBody AccessData.HardwareReport report) {
+    return parking.hardwareFeedback(report);
+  }
 }

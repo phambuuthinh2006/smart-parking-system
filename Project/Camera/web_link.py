@@ -14,24 +14,23 @@ from urllib import request
 
 
 def load_settings():
-    """Tìm đọc file .env từ thư mục hiện tại hoặc các thư mục cha."""
+    """Đọc mặc định từ gốc dự án, rồi ghi đè bằng cấu hình gần camera hơn."""
     values = {}
     search_paths = [
         Path(__file__).resolve().parent / ".env",
         Path(__file__).resolve().parents[1] / ".env",
         Path(__file__).resolve().parents[2] / ".env",
     ]
-    for env_path in search_paths:
+    for env_path in reversed(search_paths):
         if env_path.exists():
-            for line in env_path.read_text(encoding="utf-8").splitlines():
+            for line in env_path.read_text(encoding="utf-8-sig").splitlines():
                 line = line.strip()
                 if line and not line.startswith("#") and "=" in line:
                     key, value = line.split("=", 1)
                     key = key.strip()
                     value = value.strip().strip("\"'")
                     if key in ("DEVICE_API_KEY", "DEVICE_BACKEND_URL", "PARKING_DIRECTION", "ESP32_URL", "ESP32_API_KEY"):
-                        values.setdefault(key, value)
-            break
+                        values[key] = value
 
     # Ghi đè bởi biến môi trường hệ thống nếu có
     for key in ("DEVICE_API_KEY", "DEVICE_BACKEND_URL", "PARKING_DIRECTION", "ESP32_URL", "ESP32_API_KEY"):
@@ -78,6 +77,8 @@ class PlateUploader:
         self.stop_event = threading.Event()
         self.last_text = None
         self.last_at = 0
+        self.recent = {}
+        self.last_result = None
         self.thread = threading.Thread(target=self._send_loop, daemon=True)
         self.thread.start()
 
@@ -85,8 +86,11 @@ class PlateUploader:
         """Gửi biển số đọc được vào hàng đợi với cơ chế chống spam (cooldown 3s cùng 1 biển)."""
         text = str(text).strip()
         now = time.monotonic()
-        if not text or len(text) > 100 or (text == self.last_text and now - self.last_at < 3.0):
+        normalized = "".join(c for c in text.upper() if c not in " .-\t\r\n")
+        if not text or len(text) > 100 or now-self.recent.get(normalized, float('-inf')) < 3:
             return
+        self.recent = {key: at for key, at in self.recent.items() if now-at < 3}
+        self.recent[normalized] = now
         self.last_text = text
         self.last_at = now
 
@@ -121,7 +125,10 @@ class PlateUploader:
             try:
                 result = self.link.call("/api/device/plate-readings", event)
                 outcome = result.get("outcome", "RECEIVED")
-                print(f"[HTTP CAMERA] Đã gửi biển '{event['plateText']}' -> Web phản hồi: {outcome}", flush=True)
+                result_key = (result.get('plate') or event['plateText'], outcome)
+                if result_key != self.last_result:
+                    print(f"[HTTP CAMERA] Đã gửi biển '{event['plateText']}' -> Web phản hồi: {outcome}", flush=True)
+                    self.last_result = result_key
                 offline = False
             except Exception as exc:
                 if not offline:

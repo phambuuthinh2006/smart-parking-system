@@ -395,7 +395,7 @@
     padding: 11px 18px;
   }
   .access-heading > div {
-    flex: 1;
+    flex: 1 0 calc(100% - 51px);
     min-width: 0;
   }
   .access-heading h2 {
@@ -439,6 +439,8 @@
   line-height: 1.6;
   color: #475569;
 }
+.access-manual-controls { margin-top: 14px; }
+.access-manual-controls summary { cursor: pointer; font-size: 12px; color: #475569; }
 .access-clear-confirmation input {
   width: auto;
   margin-top: 3px;

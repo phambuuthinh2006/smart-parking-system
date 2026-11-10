@@ -16,8 +16,10 @@ export const visitLabel = (status) =>
   })[status] || status;
 export const outcomeLabel = (outcome) =>
   ({
-    ENTRY_PENDING: "Plate saved. Confirm passage to complete entry.",
-    EXIT_PENDING: "Exit queued. Confirm passage to record departure.",
+    ENTRY_PENDING: "Đã duyệt xe vào. Đang chờ mạch mở cổng và phản hồi xe qua.",
+    EXIT_PENDING: "Đã duyệt xe ra. Đang chờ mạch phản hồi xe qua.",
+    AUTO_PASSAGE_CONFIRMED: "Mạch đã hoàn tất chu kỳ; lượt xe được ghi tự động.",
+    AUTO_CANCELLED_CLOSE: "Mạch hủy yêu cầu vì không thấy xe; không ghi lượt qua.",
     ALREADY_INSIDE: "This plate is already inside; no new visit created.",
     INVALID_PLATE: "OCR text is not a supported plate. No open request sent.",
     NOT_REGISTERED: "Plate is not registered. No open request sent.",
@@ -90,7 +92,8 @@ export function parseAccess(data) {
     !Number.isSafeInteger(b.version) ||
     b.version < 0 ||
     typeof b.fireOverride !== "boolean" ||
-    b.hardwareConnected !== false ||
+    typeof b.hardwareConnected !== "boolean" ||
+    (b.actualPosition !== undefined && !["OPEN", "CLOSED", "UNKNOWN"].includes(b.actualPosition)) ||
     !(b.pendingVisitId === null || Number.isSafeInteger(b.pendingVisitId))
   )
     throw new Error("Invalid virtual barrier");
@@ -141,7 +144,7 @@ export function parseAccess(data) {
       !Number.isSafeInteger(e.id) ||
       e.id < 1 ||
       eventIds.has(e.id) ||
-      !["CAMERA", "SIMULATION"].includes(e.source) ||
+      !["CAMERA", "SIMULATION", "DEVICE"].includes(e.source) ||
       typeof e.outcome !== "string" ||
       (e.plate !== null && !validPlate(e.plate)) ||
       (e.confidence !== null &&

@@ -40,6 +40,16 @@ public final class AccessData {
     @NotNull @Min(0) Long expectedVersion
   ) {}
 
+  // Only the authenticated hardware bridge may finish a sensor cycle.
+  public record HardwareReport(
+    UUID requestId,
+    @NotNull @Min(0) Long expectedVersion,
+    @Min(1) Long visitId,
+    @NotBlank @Pattern(regexp = "OPEN|CLOSED") String gate,
+    @NotBlank @Pattern(regexp = "IDLE|WAITING|OPEN|PASSED|CANCELLED|BLOCKED") String phase,
+    @NotNull @Min(0) @Max(2000) Integer sampleAgeMs
+  ) {}
+
   public record Visit(
     long id,
     String plate,
@@ -72,7 +82,11 @@ public final class AccessData {
     String direction,
     String reason,
     boolean fireOverride,
-    boolean hardwareConnected
+    boolean hardwareConnected,
+    String actualPosition,
+    String hardwarePhase,
+    Instant hardwareSeenAt,
+    UUID requestId
   ) {}
 
   public record Stats(

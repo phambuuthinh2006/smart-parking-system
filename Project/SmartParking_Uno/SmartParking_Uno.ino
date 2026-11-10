@@ -12,6 +12,7 @@
 
 #include <Servo.h>
 #include <SoftwareSerial.h>
+#include "GateCycle.h"
 
 // ================= PIN CONFIGURATION =================
 
@@ -72,7 +73,7 @@ const int CLEAR_CONFIRM_COUNT = 3;
 const unsigned long WEB_REQUEST_TIMEOUT = 30000;
 
 // Thời gian tối đa Barrier được mở (phòng trường hợp kẹt cảm biến - 25 giây)
-const unsigned long GATE_MAX_OPEN_TIME = 25000;
+// No forced timeout close: unknown/blocked sensor keeps the barrier open.
 
 
 // ================= OBJECTS & STATE =================
@@ -87,6 +88,7 @@ enum GateState {
 };
 
 GateState gateState = GATE_CLOSED_STATE;
+GateCycle gateCycle;
 
 // Cờ ghi nhận yêu cầu mở từ Web
 bool webOpenRequested = false;
@@ -223,19 +225,13 @@ void handleEspCommunication() {
     String line = espSerial.readStringUntil('\n');
     line.trim();
 
-    if (line.equalsIgnoreCase("OPEN")) {
-      webOpenRequested = true;
-      webRequestTime = millis();
-      Serial.println(F("\n[ESP8266 -> UNO] Nhan yeu cau MO BARRIER tu Web!"));
-      if (isCarInFront) {
-        Serial.println(F("[ESP8266 -> UNO] Da co xe cho san truoc barrier!"));
-      } else {
-        Serial.println(F("[ESP8266 -> UNO] Dang cho xe tien vao truoc Barrier..."));
-      }
-    } 
-    else if (line.equalsIgnoreCase("CLOSE")) {
-      Serial.println(F("\n[ESP8266 -> UNO] Nhan lenh DONG BARRIER thu cong!"));
-      closeGate();
+    if (line.equalsIgnoreCase("OPEN") || line.startsWith("OPEN:")) {
+      String id = line.startsWith("OPEN:") ? line.substring(5) : "";
+      if (gateCycle.request(id.c_str(), millis()))
+        Serial.println(F("[AUTO] Accepted new gate request"));
+    } else if (line.equalsIgnoreCase("CLOSE")) {
+      if (gateCycle.cancel()) closeGate();
+      else Serial.println(F("[AUTO] Close refused: sensor blocked or unknown"));
     }
   }
 }
@@ -252,67 +248,26 @@ void sendStatusToEsp() {
   espSerial.print(F(","));
   espSerial.print(currentTemperature, 1);
   espSerial.print(F(","));
-  espSerial.println(currentLightValue);
+  espSerial.print(currentLightValue);
+  espSerial.print(F(","));
+  espSerial.print(gateCycle.requestId);
+  espSerial.print(F(","));
+  espSerial.print(gateCycle.phase);
+  espSerial.print(F(","));
+  espSerial.print(gateCycle.distance, 1);
+  espSerial.print(F(","));
+  espSerial.println(gateCycle.valid ? "1" : "0");
 }
 
 
 // ================= GATE SENSOR & LOGIC STATE MACHINE =================
 
 void handleGateLogic() {
-  // 1. Đọc cảm biến siêu âm trước Barrier
-  float gateDistance = readGateDistance();
-  bool carDetectedNow = (gateDistance > 0 && gateDistance < GATE_SENSOR_THRESHOLD);
-
-  // Bộ lọc chống nhiễu (3 lần liên tiếp)
-  if (carDetectedNow) {
-    detectedCount++;
-    clearCount = 0;
-    if (detectedCount >= DETECT_CONFIRM_COUNT) {
-      if (!isCarInFront) {
-        isCarInFront = true;
-        Serial.print(F("[SENSOR BARRIER] Phat hien XE TRUOC BARRIER! Khoang cach: "));
-        Serial.print(gateDistance);
-        Serial.println(F(" cm"));
-      }
-    }
-  } else {
-    clearCount++;
-    detectedCount = 0;
-    if (clearCount >= CLEAR_CONFIRM_COUNT) {
-      if (isCarInFront) {
-        isCarInFront = false;
-        Serial.println(F("[SENSOR BARRIER] Khong con xe truoc Barrier (vung cam bien thoang)."));
-      }
-    }
-  }
-
-  // 2. Xử lý State Machine
-  if (gateState == GATE_CLOSED_STATE) {
-    // ĐIỀU KIỆN MỞ: Cần cả Web yêu cầu + Cảm biến phát hiện có xe trước Barrier
-    if (webOpenRequested && isCarInFront) {
-      Serial.println(F("[LOGIC] Thoa man ca 2 dieu kien (Web mo + Co xe) -> MO BARRIER!"));
-      openGate();
-      webOpenRequested = false;
-    }
-
-    // Tự hủy yêu cầu nếu quá 30s không có xe đến
-    if (webOpenRequested && (millis() - webRequestTime > WEB_REQUEST_TIMEOUT)) {
-      webOpenRequested = false;
-      Serial.println(F("[TIMEOUT] Qua 30s khong co xe den truoc Barrier -> Tu dong HUY yeu cau mo!"));
-    }
-  } 
-  else if (gateState == GATE_OPENED_STATE) {
-    // ĐIỀU KIỆN ĐÓNG: Cổng đang mở, khi xe đi qua và cảm biến trước barrier không còn thấy xe
-    if (!isCarInFront) {
-      Serial.println(F("[LOGIC] Xe da di qua khoi Barrier (cam bien thoang) -> TU DONG DONG BARRIER!"));
-      closeGate();
-    }
-    // Timeout an toàn 25 giây
-    else if (millis() - gateOpenedTime > GATE_MAX_OPEN_TIME) {
-      Serial.println(F("[SAFETY TIMEOUT] Barrier mo qua 25s -> Tu dong dong de dam bao an toan!"));
-      closeGate();
-    }
-  }
+  GateCycle::Action action = gateCycle.sample(readGateDistance(), millis());
+  isCarInFront = gateCycle.present;
+  webOpenRequested = strcmp(gateCycle.phase, "WAITING") == 0;
+  if (action == GateCycle::RAISE) openGate();
+  if (action == GateCycle::LOWER) closeGate();
 }
 
 

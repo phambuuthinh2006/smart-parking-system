@@ -61,6 +61,8 @@ export default function VehicleAccessPanel({
     busy ||
     (!simulation &&
       (!reachable || !state.integrated || !state.simulationEnabled));
+  const shownPosition = !simulation && barrier.hardwareConnected
+    ? barrier.actualPosition || "UNKNOWN" : barrier.position;
   async function act(kind) {
     if (disabled) return;
     if (!simulation && ["PASSAGE", "CLOSE"].includes(kind) && !clearConfirmed) {
@@ -140,15 +142,15 @@ export default function VehicleAccessPanel({
       <div className="access-layout">
         <div className="access-barrier">
           <div className="access-barrier-caption">
-            <strong>{simulation ? "Virtual barrier" : "Requested barrier state"}</strong>
+            <strong>{simulation ? "Virtual barrier" : barrier.hardwareConnected ? "Barie · phản hồi Uno" : "Yêu cầu barie · chưa có phản hồi mạch"}</strong>
             <span
-              className={`access-position access-${barrier.position.toLowerCase()}`}
+              className={`access-position access-${shownPosition.toLowerCase()}`}
             >
-              {barrier.position}
+              {shownPosition}
             </span>
           </div>
           <div
-            className={`barrier-scene ${barrier.position === "OPEN" ? "is-open" : ""} ${barrier.position === "UNKNOWN" ? "is-unknown" : ""}`}
+            className={`barrier-scene ${shownPosition === "OPEN" ? "is-open" : ""} ${shownPosition === "UNKNOWN" ? "is-unknown" : ""}`}
             aria-hidden="true"
           >
             <div className="barrier-road">
@@ -168,6 +170,12 @@ export default function VehicleAccessPanel({
                   ? "Waiting for backend confirmation."
                   : "Ready for the next detection."}
           </p>
+          {!simulation && <p className="access-barrier-reason">
+            {barrier.hardwareConnected
+              ? `Tự động · Uno: ${barrier.hardwarePhase} · Yêu cầu: ${barrier.position}`
+              : "Mạch chưa kết nối hoặc dữ liệu đã cũ. Chạy main.py và kiểm tra firmware protocol 2."}
+            {barrier.hardwarePhase === "BLOCKED" && " · Cảm biến không hợp lệ: giữ cổng, chưa ghi lượt xe."}
+          </p>}
           <div className="access-counts">
             <span>
               <strong>{state.stats.inside}</strong> tracked inside
@@ -179,6 +187,8 @@ export default function VehicleAccessPanel({
               <strong>{state.stats.capacity}</strong> visit capacity
             </span>
           </div>
+          <details open={simulation} className="access-manual-controls">
+          <summary>{simulation ? "Simulation controls" : "Điều khiển thủ công / xử lý sự cố"}</summary>
           {!simulation && (
             <label className="access-clear-confirmation">
               <input type="checkbox" checked={clearConfirmed}
@@ -217,6 +227,7 @@ export default function VehicleAccessPanel({
               <DoorClosed size={14} /> Cancel / close
             </button>
           </div>
+          </details>
         </div>
         <div className="access-input">
           <h3>
@@ -279,7 +290,7 @@ export default function VehicleAccessPanel({
               <span className="access-error">{error}</span>
             ) : (
               info ||
-              (simulation ? "Recognition queues a visit. Confirm passage only after the simulated car crosses." : "Confirm passage only after the vehicle crosses and the barrier area is clear. A running laptop bridge can send these requests to ESP32.")
+              (simulation ? "Recognition queues a visit. Confirm passage only after the simulated car crosses." : "Camera tạo yêu cầu mới; phản hồi chu kỳ từ Uno tự ghi lượt. Các nút thủ công chỉ dùng khi xử lý sự cố.")
             )}
           </div>
           {simulation && (
@@ -371,7 +382,7 @@ export default function VehicleAccessPanel({
         <span>
           {simulation
             ? "Local virtual barrier; no hardware commands. "
-            : "This view shows backend requests, not measured gate position. A running ESP32 laptop bridge can move the servo; check its status separately. Passage is an operator confirmation. "}
+            : "Trạng thái mạch là phản hồi lệnh servo từ Uno, không phải cảm biến vị trí servo. Chu kỳ tự động suy luận xe rời vùng từ một cảm biến trên mô hình; xe lùi có thể bị hiểu là đã qua. Dữ liệu cũ hiển thị mất kết nối. "}
           Plate-to-slot mapping is not inferred from occupancy sensors.
           {!simulation &&
             " Latest 100 visits and 30 events; tracked visits do not replace parking occupancy counts."}

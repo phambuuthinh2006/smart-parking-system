@@ -55,3 +55,18 @@ Hệ thống được tách thành 2 vi điều khiển riêng biệt:
 2. Mở Wi-Fi trên Laptop: Sẽ thấy mạng **`SMART_PARKING_ESP32`** (Mật khẩu: `12345678`).
 3. Kết nối vào Wi-Fi và mở trình duyệt: Truy cập `http://192.168.4.1/status` để thấy toàn bộ thông số cảm biến từ Uno R3 gửi sang theo thời gian thực!
 
+
+
+## Cập nhật chu kỳ tự động (protocol 2)
+
+Phải nạp cả Uno và ESP mới. Uno cần `GateCycle.h` cùng thư mục `.ino`.
+ESP `/status` thêm requestId/phase/gateDistance/gateSensorValid/protocolVersion/
+telemetryValid/sampleAgeMs. Khung UART mới:
+`STATUS:slot,distance,gate,temp,ldr,requestId,phase,gateDistance,gateSensorValid`.
+
+Uno mở khi có yêu cầu và xe dưới15cm ổn định; đóng khi đo được vùng trống hợp lệ
+3mẫu sau tối thiểu1.2s. Chờ xe quá30s thì CANCELLED; đang mở mà mất echo giữ cổng.
+Đã bỏ ép đóng25s. Không echo không được coi là vùng trống; cần nền phản xạ khi không có xe.
+PASSED chỉ suy luận xe rời vùng trên mô hình, không phân biệt xe tiến qua với lùi lại.
+Đọc [SETUP.md](../SETUP.md) trước khi thử. Firmware báo trạng thái điều khiển servo,
+không đo vị trí servo bằng cảm biến độc lập.

@@ -37,7 +37,7 @@ export default function CameraPlatePanel() {
       <p>{latest?.outcome ? outcomeLabel(latest.outcome) : "Chưa có lần quét nào."}</p>
       {latest?.receivedAt && <p>Lần nhận cuối: {new Date(latest.receivedAt).toLocaleString("vi-VN")}{!connected && " · Dữ liệu đã lưu, chưa có cập nhật mới"}</p>}
       <p>Biển số đang đăng ký: {enabled.length ? enabled.map((item) => item.plate).join(", ") : "Chưa có"}</p>
-      <p>Đóng cổng: chọn Device, xác nhận xe đã qua và vùng barie trống, rồi Confirm passage. Chưa tự đóng theo thời gian.</p>
+      <p>Tự động: camera gửi biển → backend duyệt → Uno mở/đóng → phản hồi ghi lượt xe. Cần firmware Uno/ESP protocol 2 và cầu nối đang chạy. Một cảm biến chỉ suy luận xe rời vùng trong mô hình.</p>
     </div>
   </section>;
 }

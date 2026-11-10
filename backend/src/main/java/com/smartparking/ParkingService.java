@@ -204,6 +204,15 @@ public class ParkingService {
     );
   }
 
+  @Transactional
+  public AccessData.Result hardwareFeedback(AccessData.HardwareReport report) {
+    lockDevice();
+    var applied = access.hardwareFeedback(report, temperature.snapshot().gateOpenRequested(), Instant.now());
+    // Even duplicate cycle reports refresh the hardware liveness displayed by the UI.
+    db.update("UPDATE device SET revision=revision+1 WHERE id='esp8266-01'");
+    return new AccessData.Result(applied.outcome(), applied.visitId(), applied.duplicate(), publish());
+  }
+
   private void touch(Instant now) {
     db.update(
       "UPDATE device SET online=true,last_seen_at=?,revision=revision+1 WHERE id='esp8266-01'",
@@ -257,7 +266,9 @@ public class ParkingService {
     );
     for (String id : stale) updateSpace(id, Status.UNKNOWN, now, "TIMEOUT");
     boolean temperatureExpired = temperature.expire(now, staleSeconds);
-    if (changed > 0 || !stale.isEmpty() || temperatureExpired) {
+    int hardwareExpired = db.update("UPDATE barrier_hardware SET position='UNKNOWN',phase='OFFLINE' WHERE last_seen_at < ? AND position <> 'UNKNOWN'",
+      java.sql.Timestamp.from(now.minusSeconds(5)));
+    if (changed > 0 || !stale.isEmpty() || temperatureExpired || hardwareExpired > 0) {
       db.update("UPDATE device SET revision=revision+1 WHERE id='esp8266-01'");
       publish();
     }

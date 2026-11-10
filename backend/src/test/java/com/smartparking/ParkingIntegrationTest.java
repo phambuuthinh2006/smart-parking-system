@@ -64,6 +64,7 @@ class ParkingIntegrationTest {
 
   @BeforeEach
   void reset() {
+    db.update("UPDATE barrier_hardware SET position='UNKNOWN',phase='IDLE',request_id=NULL,last_seen_at=NULL");
     db.execute("TRUNCATE registered_plate");
     db.update("UPDATE camera_latest SET event_id=NULL,plate_text=NULL,plate=NULL,outcome=NULL,received_at=NULL WHERE id=1");
     for (String plate : List.of("43A12345", "43A99999", "43A12340", "43A12341", "43A12342", "43A12343"))
@@ -617,6 +618,53 @@ class ParkingIntegrationTest {
     );
     assertThat(response.getStatusCode().value()).isEqualTo(200);
     return response.getBody();
+  }
+
+  private AccessData.HardwareReport feedback(AccessData.Barrier barrier, String phase, String gate) {
+    return new AccessData.HardwareReport(barrier.requestId(), barrier.version(), barrier.pendingVisitId(), gate, phase, 100);
+  }
+
+  @Test
+  void hardwareAutomaticallyCompletesEntryExitExactlyOnceAndRequiresKey() {
+    var entry = detect(detection("43A-123.45", AccessData.Direction.ENTRY));
+    var b = entry.snapshot().access().barrier();
+    var done = feedback(b, "PASSED", "CLOSED");
+    assertThat(accessPost("/api/device/barrier-feedback", done, false).getStatusCode().value()).isEqualTo(401);
+    var opened = accessPost("/api/device/barrier-feedback", feedback(b, "OPEN", "OPEN"), true).getBody();
+    assertThat(opened.snapshot().access().stats().pendingEntry()).isEqualTo(1);
+    assertThat(opened.snapshot().access().barrier().actualPosition()).isEqualTo("OPEN");
+    var completed = accessPost("/api/device/barrier-feedback", done, true).getBody();
+    assertThat(completed.outcome()).isEqualTo("AUTO_PASSAGE_CONFIRMED");
+    assertThat(completed.snapshot().access().stats().inside()).isEqualTo(1);
+    assertThat(completed.snapshot().access().barrier().position()).isEqualTo("CLOSED");
+    var duplicate = accessPost("/api/device/barrier-feedback", done, true).getBody();
+    assertThat(duplicate.duplicate()).isTrue();
+    assertThat(db.queryForObject("SELECT count(*) FROM vehicle_access_event WHERE source='DEVICE'", Integer.class)).isEqualTo(1);
+    var exit = detect(detection("43A-123.45", AccessData.Direction.EXIT));
+    // Old retained telemetry must not finish a new cycle.
+    accessPost("/api/device/barrier-feedback", done, true);
+    assertThat(service.snapshot().access().stats().pendingExit()).isEqualTo(1);
+    var exited = accessPost("/api/device/barrier-feedback", feedback(exit.snapshot().access().barrier(), "PASSED", "CLOSED"), true).getBody();
+    assertThat(exited.snapshot().access().stats().exited()).isEqualTo(1);
+    assertThat(exited.snapshot().access().stats().inside()).isZero();
+  }
+
+  @Test
+  void hardwareRejectsWrongCycleStaleSamplesAndNeverCountsBlockedOrTimeoutAsPassage() {
+    var b = detect(detection("43A-123.45", AccessData.Direction.ENTRY)).snapshot().access().barrier();
+    var wrong = new AccessData.HardwareReport(UUID.randomUUID(), b.version(), b.pendingVisitId(), "CLOSED", "PASSED", 100);
+    assertThat(accessPost("/api/device/barrier-feedback", wrong, true).getBody().outcome()).isEqualTo("STALE_CYCLE");
+    var stale = new AccessData.HardwareReport(b.requestId(), b.version(), b.pendingVisitId(), "CLOSED", "PASSED", 2001);
+    assertThat(accessPost("/api/device/barrier-feedback", stale, true).getStatusCode().is4xxClientError()).isTrue();
+    accessPost("/api/device/barrier-feedback", feedback(b, "BLOCKED", "OPEN"), true);
+    assertThat(service.snapshot().access().stats().inside()).isZero();
+    assertThat(service.snapshot().access().stats().pendingEntry()).isEqualTo(1);
+    var cancelled = accessPost("/api/device/barrier-feedback", feedback(b, "CANCELLED", "CLOSED"), true).getBody();
+    assertThat(cancelled.outcome()).isEqualTo("AUTO_CANCELLED_CLOSE");
+    assertThat(cancelled.snapshot().access().visits().get(0).status()).isEqualTo("CANCELLED");
+    assertThat(cancelled.snapshot().access().visits().get(0).entryAt()).isNull();
+    db.update("UPDATE barrier_hardware SET last_seen_at=now()-interval '10 seconds'");
+    assertThat(service.snapshot().access().barrier().hardwareConnected()).isFalse();
   }
 
   @Test

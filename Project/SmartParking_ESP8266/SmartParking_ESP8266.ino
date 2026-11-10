@@ -28,20 +28,28 @@ bool slotOccupied = false;
 float slotDistance = 0.0;
 float currentTemperature = 0.0;
 int currentLightValue = 0;
+String cycleRequestId = "";
+String cyclePhase = "IDLE";
+float gateDistance = -1;
+bool gateSensorValid = false;
+bool telemetryReceived = false;
+unsigned long lastTelemetryAt = 0;
+String serialLine;
 
 
 // ================= HTTP API HANDLERS =================
 
 // API mở barrier: POST hoặc GET /open
 void handleOpen() {
-  // Gửi lệnh mở cho Uno R3 qua Serial
-  Serial.println("OPEN");
-
-  server.send(
-    200,
-    "application/json",
-    "{\"status\":\"COMMAND_RECEIVED\",\"command\":\"OPEN\"}"
-  );
+  String id = server.arg("requestId");
+  if (id.length()) {
+    bool valid = id.length() == 36;
+    for (unsigned int i = 0; valid && i < id.length(); ++i)
+      valid = (i == 8 || i == 13 || i == 18 || i == 23) ? id[i] == '-' : isxdigit(id[i]);
+    if (!valid) { server.send(400, "application/json", "{\"error\":\"Invalid requestId\"}"); return; }
+  }
+  Serial.println(id.length() ? "OPEN:" + id : "OPEN");
+  server.send(200, "application/json", "{\"status\":\"COMMAND_RECEIVED\",\"requestId\":\"" + id + "\"}");
 }
 
 // API đóng barrier: POST hoặc GET /close
@@ -82,7 +90,14 @@ void handleStatus() {
   json += "\"temperature\":" + String(currentTemperature, 1) + ",";
   json += "\"temperatureValid\":true,";
   json += "\"fireAlarm\":" + String(isFire ? "true" : "false") + ",";
-  json += "\"light\":" + String(currentLightValue);
+  json += "\"light\":" + String(currentLightValue) + ",";
+  json += "\"protocolVersion\":2,";
+  json += "\"telemetryValid\":" + String(telemetryReceived && millis() - lastTelemetryAt <= 2000 ? "true" : "false") + ",";
+  json += "\"sampleAgeMs\":" + String(telemetryReceived ? millis() - lastTelemetryAt : 4294967295UL) + ",";
+  json += "\"requestId\":\"" + cycleRequestId + "\",";
+  json += "\"phase\":\"" + cyclePhase + "\",";
+  json += "\"gateDistance\":" + String(gateDistance, 1) + ",";
+  json += "\"gateSensorValid\":" + String(gateSensorValid ? "true" : "false");
   json += "}";
 
   server.send(200, "application/json", json);
@@ -93,33 +108,38 @@ void handleStatus() {
 
 // Chuỗi gửi từ Uno có định dạng:
 // STATUS:<slot_occupied>,<slot_distance>,<gate_state>,<temp>,<ldr>\n
+void processUnoLine(String line) {
+  line.trim();
+  if (!line.startsWith("STATUS:")) return;
+  String fields[9];
+  int start = 7;
+  for (int i = 0; i < 9; ++i) {
+    int end = line.indexOf(',', start);
+    if (i < 8 && end < 0) return;  // Old firmware is not valid cycle telemetry.
+    fields[i] = i == 8 ? line.substring(start) : line.substring(start, end);
+    start = end + 1;
+  }
+  if (fields[5].length() > 36 || fields[6].length() > 12) return;
+  slotOccupied = fields[0] == "1";
+  slotDistance = fields[1].toFloat();
+  gateOpen = fields[2] == "1";
+  currentTemperature = fields[3].toFloat();
+  currentLightValue = fields[4].toInt();
+  cycleRequestId = fields[5];
+  cyclePhase = fields[6];
+  gateDistance = fields[7].toFloat();
+  gateSensorValid = fields[8] == "1";
+  telemetryReceived = true;
+  lastTelemetryAt = millis();
+}
+
 void readDataFromUno() {
-  while (Serial.available() > 0) {
-    String line = Serial.readStringUntil('\n');
-    line.trim();
-
-    if (line.startsWith("STATUS:")) {
-      String data = line.substring(7); // Bỏ tiền tố "STATUS:"
-      
-      // Tách chuỗi theo dấu phẩy
-      int idx1 = data.indexOf(',');
-      int idx2 = data.indexOf(',', idx1 + 1);
-      int idx3 = data.indexOf(',', idx2 + 1);
-      int idx4 = data.indexOf(',', idx3 + 1);
-
-      if (idx1 > 0 && idx2 > 0 && idx3 > 0 && idx4 > 0) {
-        String sSlot = data.substring(0, idx1);
-        String sDist = data.substring(idx1 + 1, idx2);
-        String sGate = data.substring(idx2 + 1, idx3);
-        String sTemp = data.substring(idx3 + 1, idx4);
-        String sLdr  = data.substring(idx4 + 1);
-
-        slotOccupied = (sSlot == "1");
-        slotDistance = sDist.toFloat();
-        gateOpen     = (sGate == "1");
-        currentTemperature = sTemp.toFloat();
-        currentLightValue  = sLdr.toInt();
-      }
+  while (Serial.available()) {
+    char ch = Serial.read();
+    if (ch == '\n') { processUnoLine(serialLine); serialLine = ""; }
+    else if (ch != '\r') {
+      serialLine += ch;
+      if (serialLine.length() > 160) serialLine = "";
     }
   }
 }

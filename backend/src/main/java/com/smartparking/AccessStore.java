@@ -212,16 +212,23 @@ public class AccessStore {
   @Transactional(propagation = Propagation.MANDATORY)
   public Applied command(Command command, boolean fireOverride, Instant now) {
     requireSimulation();
+    return applyCommand(command, fireOverride, now, "SIMULATION", null);
+  }
+
+  private Applied applyCommand(Command command, boolean fireOverride, Instant now, String source, Long requiredVisit) {
     Saved prior = saved(command.eventId());
     if (prior != null) {
       if (
         !prior.kind.equals(command.action().name()) ||
         !Objects.equals(prior.expectedVersion, command.expectedVersion()) ||
-        !prior.source.equals("SIMULATION")
+        !prior.source.equals(source) ||
+        (requiredVisit != null && !Objects.equals(requiredVisit, prior.visitId))
       ) throw conflict("Command ID was already used for different data");
       return new Applied(prior.outcome, prior.visitId, true);
     }
     var b = barrierRow(false);
+    if (requiredVisit != null && !Objects.equals(requiredVisit, b.pendingVisitId()))
+      throw conflict("Hardware cycle belongs to another visit");
     if (b.version() != command.expectedVersion()) throw conflict(
       "Barrier changed. Refresh before retrying"
     );
@@ -270,19 +277,49 @@ public class AccessStore {
         command.action() == Action.PASSAGE
           ? "PASSAGE_CONFIRMED"
           : "CANCELLED_CLOSE";
+      if (source.equals("DEVICE")) outcome = command.action() == Action.PASSAGE
+        ? "AUTO_PASSAGE_CONFIRMED" : "AUTO_CANCELLED_CLOSE";
     }
     db.update(
-      "INSERT INTO vehicle_access_event(event_id,kind,plate,direction,source,outcome,visit_id,expected_version,created_at) VALUES (?,?,?,?,'SIMULATION',?,?,?,?)",
+      "INSERT INTO vehicle_access_event(event_id,kind,plate,direction,source,outcome,visit_id,expected_version,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
       command.eventId(),
       command.action().name(),
       plate,
       direction,
+      source,
       outcome,
       visitId,
       command.expectedVersion(),
       Timestamp.from(now)
     );
     return new Applied(outcome, visitId, false);
+  }
+
+  public static UUID requestId(long version, Long visitId) {
+    return visitId == null ? null : UUID.nameUUIDFromBytes(
+      ("smart-parking:" + version + ":" + visitId).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+  }
+
+  @Transactional(propagation = Propagation.MANDATORY)
+  public Applied hardwareFeedback(HardwareReport report, boolean fire, Instant now) {
+    db.update("UPDATE barrier_hardware SET position=?,phase=?,request_id=?,last_seen_at=? WHERE id=1",
+      report.gate(), report.phase(), report.requestId(), Timestamp.from(now));
+    boolean passed = report.phase().equals("PASSED");
+    if (!passed && !report.phase().equals("CANCELLED"))
+      return new Applied("HARDWARE_UPDATED", null, false);
+    if (!report.gate().equals("CLOSED") || report.visitId() == null ||
+        !Objects.equals(report.requestId(), requestId(report.expectedVersion(), report.visitId())))
+      return new Applied("STALE_CYCLE", null, false);
+    var command = new Command(report.requestId(), passed ? Action.PASSAGE : Action.CLOSE, report.expectedVersion());
+    Saved prior = saved(report.requestId());
+    if (prior != null) return applyCommand(command, fire, now, "DEVICE", report.visitId());
+    var barrier = barrierRow(false);
+    if (fire || barrier.version() != report.expectedVersion() ||
+        !Objects.equals(barrier.pendingVisitId(), report.visitId()) || !barrier.position().equals("OPEN"))
+      return new Applied("STALE_CYCLE", null, false);
+    var applied = applyCommand(command, false, now, "DEVICE", report.visitId());
+    db.update("UPDATE camera_latest SET outcome=? WHERE id=1 AND plate=?", applied.outcome(), barrier.pendingPlate());
+    return applied;
   }
 
   private Visit visit(ResultSet r, int row) throws SQLException {
@@ -298,6 +335,9 @@ public class AccessStore {
   }
 
   private Barrier barrierRow(boolean fire) {
+    var hardware = db.queryForMap("SELECT * FROM barrier_hardware WHERE id=1");
+    var seen = (Timestamp) hardware.get("last_seen_at");
+    boolean connected = seen != null && seen.toInstant().isAfter(Instant.now().minusSeconds(5));
     return db.queryForObject(
       "SELECT b.*,v.plate FROM virtual_barrier b LEFT JOIN vehicle_visit v ON v.id=b.pending_visit_id WHERE b.id=1",
       (r, n) ->
@@ -309,7 +349,11 @@ public class AccessStore {
           r.getString("direction"),
           fire ? "FIRE_OVERRIDE" : r.getString("reason"),
           fire,
-          false
+          connected,
+          connected ? (String) hardware.get("position") : "UNKNOWN",
+          connected ? (String) hardware.get("phase") : "OFFLINE",
+          seen == null ? null : seen.toInstant(),
+          requestId(r.getLong("version"), number(r, "pending_visit_id"))
         )
     );
   }

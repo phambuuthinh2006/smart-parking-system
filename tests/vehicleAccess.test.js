@@ -50,3 +50,15 @@ test("plate validation rejects OCR noise; older backend has no fabricated vehicl
   assert.equal(parseAccess(undefined).barrier.position, "UNKNOWN");
   assert.throws(() => parseAccess({}), /Invalid/);
 });
+
+test("hardware feedback and DEVICE passage events are accepted without inventing a visit", () => {
+  const state = detect(initialAccessSimulation(), "43A12345");
+  state.barrier.hardwareConnected = true;
+  state.barrier.actualPosition = "OPEN";
+  state.barrier.hardwarePhase = "OPEN";
+  state.events[0].source = "DEVICE";
+  state.events[0].outcome = "AUTO_PASSAGE_CONFIRMED";
+  assert.equal(parseAccess(state).barrier.actualPosition, "OPEN");
+  state.barrier.actualPosition = "made-up";
+  assert.throws(() => parseAccess(state), /Invalid/);
+});
