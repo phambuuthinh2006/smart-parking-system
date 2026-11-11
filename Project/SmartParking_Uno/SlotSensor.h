@@ -8,11 +8,11 @@ class SlotSensor {
   void sample(float cm) {
     valid = cm > 0 && cm <= 400;
     if (!valid) { occupied = clear = 0; status = "UNKNOWN"; return; }
-    if (cm < 15) {
+    if (cm < 6) {
       clear = 0;
       if (occupied < 3) ++occupied;
       if (occupied == 3) status = "OCCUPIED";
-    } else if (cm >= 18) {
+    } else if (cm >= 8) {
       occupied = 0;
       if (clear < 3) ++clear;
       if (clear == 3) status = "AVAILABLE";
