@@ -52,8 +52,8 @@
 
 // ================= CONFIGURATION =================
 
-// Khoảng cách xác định có xe tại chỗ đỗ (slot) - cm
-const float SLOT_THRESHOLD = 15.0;
+// Khoảng cách xác định có xe tại chỗ đỗ (slot) - cm (ngưỡng 10cm chuẩn mô hình bàn học)
+const float SLOT_THRESHOLD = 10.0;
 
 // Khoảng cách xác định có xe đứng TRƯỚC Barrier - cm (ngưỡng 10cm chuẩn mô hình bàn học)
 const float GATE_SENSOR_THRESHOLD = 10.0;
