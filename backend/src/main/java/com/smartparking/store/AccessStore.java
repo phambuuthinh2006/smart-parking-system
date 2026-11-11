@@ -368,9 +368,11 @@ public class AccessStore {
         Visit visit = pending.get(0);
         boolean arrived = Boolean.TRUE.equals(db.queryForObject("SELECT EXISTS(SELECT 1 FROM vehicle_visit WHERE id=? AND slot_clear_confirmed_at>=gate_entered_at)", Boolean.class, visit.id()));
         if (arrived) {
-          db.update("UPDATE vehicle_visit SET status='INSIDE',entry_at=?,slot_left_at=NULL WHERE id=? AND status='PENDING_PARKING'", Timestamp.from(now), visit.id());
-          db.update("INSERT INTO vehicle_access_event(event_id,kind,plate,direction,source,outcome,visit_id,created_at) VALUES (?,'SLOT',?,'ENTRY','DEVICE','SLOT_PARKED',?,?)", UUID.nameUUIDFromBytes(("parked:"+visit.id()).getBytes(java.nio.charset.StandardCharsets.UTF_8)), visit.plate(), visit.id(), Timestamp.from(now));
-          db.update("UPDATE camera_latest SET outcome='SLOT_PARKED' WHERE plate=?", visit.plate());
+          int updated = db.update("UPDATE vehicle_visit SET status='INSIDE',entry_at=?,slot_left_at=NULL WHERE id=? AND status='PENDING_PARKING'", Timestamp.from(now), visit.id());
+          if (updated > 0) {
+            db.update("INSERT INTO vehicle_access_event(event_id,kind,plate,direction,source,outcome,visit_id,created_at) VALUES (?,'SLOT',?,'ENTRY','DEVICE','SLOT_PARKED',?,?)", UUID.randomUUID(), visit.plate(), visit.id(), Timestamp.from(now));
+            db.update("UPDATE camera_latest SET outcome='SLOT_PARKED' WHERE plate=?", visit.plate());
+          }
         }
       }
       db.update("UPDATE vehicle_visit SET slot_left_at=NULL WHERE status='INSIDE'");
@@ -378,10 +380,12 @@ public class AccessStore {
       db.update("UPDATE vehicle_visit SET slot_clear_confirmed_at=? WHERE status='PENDING_PARKING' AND slot_clear_confirmed_at IS NULL AND gate_entered_at<=?", Timestamp.from(now), Timestamp.from(now));
       var leaving = db.query("SELECT * FROM vehicle_visit WHERE status='INSIDE'", this::visit);
       for (Visit v : leaving) {
-        db.update("UPDATE vehicle_visit SET status='PENDING_EXIT', slot_left_at=? WHERE id=?", Timestamp.from(now), v.id());
-        db.update("INSERT INTO vehicle_access_event(event_id,kind,plate,direction,source,outcome,visit_id,created_at) VALUES (?,'SLOT',?,'EXIT','DEVICE','SLOT_LEFT',?,?)",
-          UUID.nameUUIDFromBytes(("leaving:" + v.id()).getBytes(java.nio.charset.StandardCharsets.UTF_8)), v.plate(), v.id(), Timestamp.from(now));
-        db.update("UPDATE camera_latest SET outcome='SLOT_LEFT' WHERE plate=?", v.plate());
+        int updated = db.update("UPDATE vehicle_visit SET status='PENDING_EXIT', slot_left_at=? WHERE id=? AND status='INSIDE'", Timestamp.from(now), v.id());
+        if (updated > 0) {
+          db.update("INSERT INTO vehicle_access_event(event_id,kind,plate,direction,source,outcome,visit_id,created_at) VALUES (?,'SLOT',?,'EXIT','DEVICE','SLOT_LEFT',?,?)",
+            UUID.randomUUID(), v.plate(), v.id(), Timestamp.from(now));
+          db.update("UPDATE camera_latest SET outcome='SLOT_LEFT' WHERE plate=?", v.plate());
+        }
       }
     }
   }

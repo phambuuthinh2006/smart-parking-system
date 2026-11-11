@@ -47,10 +47,15 @@ class GatePlan:
         return None
 
 
-def send_esp_command(opener, esp_url, command, key="", request_id=None):
+def send_esp_command(opener, esp_url, command, key="", request_id=None, direction=None):
     path = "/close" if command == "close" else "/open"
+    query = {}
     if request_id:
-        path += "?" + parse.urlencode({"requestId": request_id})
+        query["requestId"] = request_id
+    if direction:
+        query["direction"] = direction
+    if query:
+        path += "?" + parse.urlencode(query)
     headers = {"Content-Type": "application/json"}
     if key:
         headers["X-Device-Key"] = key
@@ -175,8 +180,9 @@ class GateLinkRunner:
                 stage = "ESP command"
                 if token or (command and (not state["barrier"].get("requestId") or state["barrier"].get("fireOverride"))):
                     sent = command or "open"
-                    res = send_esp_command(self.backend.opener, self.esp_url, sent, self.esp_key, token)
-                    print(f"\n>>> [GATE LINK] Đã chuyển lệnh '{sent.upper()}' sang ESP32! Phản hồi: {res.get('status')}", flush=True)
+                    direction = state["barrier"].get("direction")
+                    res = send_esp_command(self.backend.opener, self.esp_url, sent, self.esp_key, token, direction=direction)
+                    print(f"\n>>> [GATE LINK] Đã chuyển lệnh '{sent.upper()}' ({direction or 'UNKNOWN'}) sang ESP32! Phản hồi: {res.get('status')}", flush=True)
                 if not connected:
                     print("[GATE LINK] Connected: backend + fresh Uno telemetry", flush=True)
                 connected = True

@@ -45,13 +45,18 @@ bool slotSensorValid = false;
 // API mở barrier: POST hoặc GET /open
 void handleOpen() {
   String id = server.arg("requestId");
+  String dir = server.arg("direction");
   if (id.length()) {
     bool valid = id.length() == 36;
     for (unsigned int i = 0; valid && i < id.length(); ++i)
       valid = (i == 8 || i == 13 || i == 18 || i == 23) ? id[i] == '-' : isxdigit(id[i]);
     if (!valid) { server.send(400, "application/json", "{\"error\":\"Invalid requestId\"}"); return; }
   }
-  Serial.println(id.length() ? "OPEN:" + id : "OPEN");
+  if (dir.equalsIgnoreCase("EXIT")) {
+    Serial.println(id.length() ? "OPEN_EXIT:" + id : "OPEN_EXIT");
+  } else {
+    Serial.println(id.length() ? "OPEN:" + id : "OPEN");
+  }
   server.send(200, "application/json", "{\"status\":\"COMMAND_RECEIVED\",\"requestId\":\"" + id + "\"}");
 }
 

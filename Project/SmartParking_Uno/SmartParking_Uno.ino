@@ -227,10 +227,28 @@ void handleEspCommunication() {
     String line = espSerial.readStringUntil('\n');
     line.trim();
 
-    if (line.equalsIgnoreCase("OPEN") || line.startsWith("OPEN:")) {
+    if (line.startsWith("OPEN_EXIT:") || line.equalsIgnoreCase("OPEN_EXIT")) {
+      String id = line.startsWith("OPEN_EXIT:") ? line.substring(10) : "";
+      if (gateCycle.requestExit(id.c_str(), millis())) {
+        openGate();
+        Serial.println(F("\n============================================="));
+        Serial.println(F(">>> [EXIT ACTION] MO BARRIER NGAY CHO XE RA <<<"));
+        Serial.println(F("=============================================\n"));
+      }
+    } else if (line.equalsIgnoreCase("OPEN") || line.startsWith("OPEN:")) {
       String id = line.startsWith("OPEN:") ? line.substring(5) : "";
-      if (gateCycle.request(id.c_str(), millis()))
-        Serial.println(F("[AUTO] Accepted new gate request"));
+      // Nếu khoảng cách cổng thoáng (xe ở trong bãi xin ra), tự động dùng luồng EXIT mở ngay:
+      if (gateCycle.distance >= 15.0) {
+        if (gateCycle.requestExit(id.c_str(), millis())) {
+          openGate();
+          Serial.println(F("\n============================================="));
+          Serial.println(F(">>> [EXIT AUTO] MO BARRIER NGAY CHO XE RA   <<<"));
+          Serial.println(F("=============================================\n"));
+        }
+      } else {
+        if (gateCycle.request(id.c_str(), millis()))
+          Serial.println(F("[AUTO] Accepted ENTRY gate request - Cho xe vao"));
+      }
     } else if (line.equalsIgnoreCase("CLOSE")) {
       if (gateCycle.cancel()) closeGate();
       else Serial.println(F("[AUTO] Close refused: sensor blocked or unknown"));
@@ -273,7 +291,7 @@ void sendStatusToEsp() {
 void handleGateLogic() {
   GateCycle::Action action = gateCycle.sample(readGateDistance(), millis());
   isCarInFront = gateCycle.present;
-  webOpenRequested = strcmp(gateCycle.phase, "WAITING") == 0;
+  webOpenRequested = strcmp(gateCycle.phase, "WAITING") == 0 || (gateCycle.isExit && strcmp(gateCycle.phase, "OPEN") == 0);
   if (action == GateCycle::RAISE) openGate();
   if (action == GateCycle::LOWER) closeGate();
 }
