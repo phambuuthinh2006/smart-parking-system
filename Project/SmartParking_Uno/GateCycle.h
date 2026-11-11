@@ -3,8 +3,8 @@
 #include <string.h>
 
 // Demo inference: present -> open immediately on backend approval -> detect vehicle passage -> lower.
-// Ngưỡng cảm biến cổng calibrated: < 8.0cm là có xe đứng trước/dưới cổng.
-static const float GATE_THRESHOLD = 8.0f;
+// Ngưỡng cảm biến cổng calibrated: < 10.0cm là có xe đứng trước/dưới cổng (độ nhạy lý tưởng cho mô hình bàn học).
+static const float GATE_THRESHOLD = 10.0f;
 
 class GateCycle {
  public:
@@ -82,8 +82,9 @@ class GateCycle {
     }
 
     if (opened) {
-      // 1. Timeout 15 giây nếu xe không đi qua -> Tự động đóng và hủy lệnh
-      if (now - openedAt >= 15000) {
+      // 1. Timeout an toàn: Đóng sau 15 giây nếu xe không đi qua (chỉ đóng khi phía dưới cổng thoáng để chống kẹp xe)
+      // Nếu sau 25 giây vẫn kẹt thì bắt buộc hạ an toàn
+      if ((now - openedAt >= 15000 && cleared >= 2) || (now - openedAt >= 25000)) {
         opened = false;
         isExit = false;
         carSeen = false;

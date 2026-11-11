@@ -55,8 +55,8 @@
 // Khoảng cách xác định có xe tại chỗ đỗ (slot) - cm
 const float SLOT_THRESHOLD = 15.0;
 
-// Khoảng cách xác định có xe đứng TRƯỚC Barrier - cm (ngưỡng 8cm chuẩn mô hình)
-const float GATE_SENSOR_THRESHOLD = 8.0;
+// Khoảng cách xác định có xe đứng TRƯỚC Barrier - cm (ngưỡng 10cm chuẩn mô hình bàn học)
+const float GATE_SENSOR_THRESHOLD = 10.0;
 
 // Ngưỡng nhiệt độ cảnh báo cháy (°C)
 const float TEMP_THRESHOLD = 45.0;

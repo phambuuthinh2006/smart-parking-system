@@ -202,10 +202,11 @@ class PlateUploader:
                     print(f"[HTTP CAMERA] Đã gửi biển '{event['plateText']}' -> Web phản hồi: {outcome}", flush=True)
                     self.last_result = result_key
 
-                # Nếu Backend duyệt thành công -> khóa encounter để tránh OCR rác ghi đè
+                # Nếu Backend duyệt thành công -> khóa encounter (chỉ áp dụng khi còn khớp đúng encounter hiện tại)
                 if outcome in ("ENTRY_PENDING", "EXIT_PENDING", "WAITING_PARKING", "ENCOUNTER_USED"):
-                    self.lock_encounter()
-                    print(f"[HTTP CAMERA] Đã khóa encounter ({outcome}) - Tạm ngừng gửi đọc biển cho tới khi xe mới tới", flush=True)
+                    if event.get("encounterId") == self.encounter.id:
+                        self.lock_encounter()
+                        print(f"[HTTP CAMERA] Đã khóa encounter ({outcome}) - Tạm ngừng gửi đọc biển cho tới khi xe mới tới", flush=True)
 
                 offline = False
             except Exception as exc:
