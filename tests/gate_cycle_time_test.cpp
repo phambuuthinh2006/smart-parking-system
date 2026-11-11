@@ -1,7 +1,7 @@
 #include <cassert>
 #include <iostream>
 #include <cstring>
-#include "GateCycle.h"
+#include "../Project/SmartParking_Uno/GateCycle.h"
 
 int main() {
   std::cout << "Starting GateCycle Time-based Verification Tests..." << std::endl;
