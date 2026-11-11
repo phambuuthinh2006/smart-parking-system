@@ -121,6 +121,20 @@ class CameraEncounter:
         return self.id
 
 
+def clean_plate_text(text):
+    s = "".join(c for c in str(text).upper() if c.isalnum())
+    m = re.match(r'^(\d{2}[A-Z]{1,2})(\d{4,5})', s)
+    if not m:
+        return None, None
+    norm = m.group(1) + m.group(2)
+    # Nếu OCR đọc dính số rác ở đuôi (ví dụ: '36H 123451' thừa số 1 do viền biển số) -> Cắt bỏ số rác
+    if len(s) > len(norm):
+        clean_text = f"{m.group(1)}-{m.group(2)}"
+    else:
+        clean_text = str(text).strip()
+    return norm, clean_text
+
+
 class PlateUploader:
     def __init__(self, link=None):
         self.link = link or HttpLink()
@@ -151,28 +165,25 @@ class PlateUploader:
 
     def submit(self, text):
         """Gửi biển số đọc được vào hàng đợi với cơ chế chống spam (cooldown 3s cùng 1 biển)."""
-        text = str(text).strip()
-        now = time.monotonic()
-        normalized = "".join(c for c in text.upper() if c not in " .-\t\r\n")
-
-        # 1. Lọc định dạng biển số hợp lệ (2 số, 1-2 chữ, 4-6 số)
-        if not re.match(r'^\d{2}[A-Z]{1,2}\d{4,6}$', normalized):
+        norm, clean_text = clean_plate_text(text)
+        if not norm:
             return
 
-        # 2. Kiểm tra khóa encounter: Đã được Backend duyệt thì không gửi spam nữa
+        # Kiểm tra khóa encounter: Đã được Backend duyệt thì không gửi spam nữa
         if self.encounter_locked:
             return
 
-        if not text or len(text) > 100 or now-self.recent.get(normalized, float('-inf')) < 3:
+        now = time.monotonic()
+        if now - self.recent.get(norm, float('-inf')) < 3:
             return
-        self.recent = {key: at for key, at in self.recent.items() if now-at < 3}
-        self.recent[normalized] = now
-        self.last_text = text
+        self.recent = {key: at for key, at in self.recent.items() if now - at < 3}
+        self.recent[norm] = now
+        self.last_text = clean_text
         self.last_at = now
 
         event = {
             "eventId": str(uuid.uuid4()),
-            "plateText": text,
+            "plateText": clean_text,
             "direction": self.link.direction,
             "encounterId": self.encounter.id,
             "observedAt": datetime.now(timezone.utc).isoformat()
