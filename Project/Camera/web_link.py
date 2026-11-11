@@ -137,6 +137,11 @@ class PlateUploader:
 
     def lock_encounter(self):
         self.encounter_locked = True
+        try:
+            while not self.pending.empty():
+                self.pending.get_nowait()
+        except Exception:
+            pass
 
     def unlock_encounter(self):
         self.encounter_locked = False
@@ -194,6 +199,10 @@ class PlateUploader:
             except queue.Empty:
                 continue
 
+            # Nếu lượt này đã được Backend duyệt thành công, bỏ qua mọi ảnh rác còn sót lại
+            if self.encounter_locked:
+                continue
+
             try:
                 result = self.link.call("/api/device/plate-readings", event)
                 outcome = result.get("outcome", "RECEIVED")
@@ -206,7 +215,7 @@ class PlateUploader:
                 if outcome in ("ENTRY_PENDING", "EXIT_PENDING", "WAITING_PARKING", "ENCOUNTER_USED"):
                     if event.get("encounterId") == self.encounter.id:
                         self.lock_encounter()
-                        print(f"[HTTP CAMERA] Đã khóa encounter ({outcome}) - Tạm ngừng gửi đọc biển cho tới khi xe mới tới", flush=True)
+                        print(f"[HTTP CAMERA] >>> ĐÃ DUYỆT XE '{event['plateText']}' ({outcome}) - Barrier đang mở, mời xe đi qua! <<<", flush=True)
 
                 offline = False
             except Exception as exc:

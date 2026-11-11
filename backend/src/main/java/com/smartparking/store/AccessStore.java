@@ -166,7 +166,13 @@ public class AccessStore {
       outcome = "WAITING_PARKING"; visitId = current.id();
     }
     else if (auto && current != null && (current.status().equals("PENDING_ENTRY") || (current.status().equals("PENDING_EXIT") && barrier.position().equals("OPEN")))) {
-      outcome = current.status().equals("PENDING_ENTRY") ? "ENTRY_PENDING" : "EXIT_PENDING"; visitId = current.id();
+      outcome = current.status().equals("PENDING_ENTRY") ? "ENTRY_PENDING" : "EXIT_PENDING";
+      visitId = current.id();
+      // Nếu barrier chưa mở hoặc cần vật lý đang đóng, kích hoạt mở ngay và tăng version để ESP nhận lệnh
+      if (!barrier.position().equals("OPEN") || !barrier.actualPosition().equals("OPEN")) {
+        open(visitId, outcome.equals("ENTRY_PENDING") ? "ENTRY" : "EXIT", now);
+        opened = true;
+      }
     }
     else if (auto && direction == Direction.ENTRY && !gateReady()) outcome = "WAITING_GATE_SENSOR";
     else if (auto && direction == Direction.ENTRY && !slotIs("AVAILABLE")) outcome = "SLOT_NOT_READY";
