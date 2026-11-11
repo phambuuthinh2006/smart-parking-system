@@ -245,7 +245,7 @@ void handleEspCommunication() {
         Serial.println(F("=============================================\n"));
       }
     } else if (line.equalsIgnoreCase("CLOSE")) {
-      if (gateCycle.cancel()) closeGate();
+      if (gateCycle.cancel(millis())) closeGate();
       else Serial.println(F("[AUTO] Close refused: sensor blocked or unknown"));
     }
   }
