@@ -158,6 +158,14 @@ class GateLinkRunner:
                     stage = "backend /device/barrier-feedback"
                     result = self.backend.call("/api/device/barrier-feedback", self.auto.feedback(state, physical))
                     self.auto.last_feedback = now
+                    if physical.get("temperatureValid") and physical.get("temperature") is not None:
+                        try:
+                            self.backend.call("/api/device/temperature", {
+                                "deviceId": "esp8266-01",
+                                "temperatureCelsius": round(float(physical["temperature"]), 2)
+                            })
+                        except Exception:
+                            pass
                     if result.get("outcome") in ("GATE_ENTERED", "AUTO_PASSAGE_CONFIRMED", "AUTO_CANCELLED_CLOSE"):
                         print(f"[GATE LINK] {result['outcome']}: visit synchronized automatically", flush=True)
                     state = result["snapshot"]["access"]
