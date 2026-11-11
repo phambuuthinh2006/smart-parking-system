@@ -55,8 +55,8 @@
 // Khoảng cách xác định có xe tại chỗ đỗ (slot) - cm
 const float SLOT_THRESHOLD = 15.0;
 
-// Khoảng cách xác định có xe đứng TRƯỚC Barrier - cm
-const float GATE_SENSOR_THRESHOLD = 15.0;
+// Khoảng cách xác định có xe đứng TRƯỚC Barrier - cm (ngưỡng 8cm chuẩn mô hình)
+const float GATE_SENSOR_THRESHOLD = 8.0;
 
 // Ngưỡng nhiệt độ cảnh báo cháy (°C)
 const float TEMP_THRESHOLD = 45.0;
@@ -237,17 +237,12 @@ void handleEspCommunication() {
       }
     } else if (line.equalsIgnoreCase("OPEN") || line.startsWith("OPEN:")) {
       String id = line.startsWith("OPEN:") ? line.substring(5) : "";
-      // Nếu khoảng cách cổng thoáng (xe ở trong bãi xin ra), tự động dùng luồng EXIT mở ngay:
-      if (gateCycle.distance >= 15.0) {
-        if (gateCycle.requestExit(id.c_str(), millis())) {
-          openGate();
-          Serial.println(F("\n============================================="));
-          Serial.println(F(">>> [EXIT AUTO] MO BARRIER NGAY CHO XE RA   <<<"));
-          Serial.println(F("=============================================\n"));
-        }
-      } else {
-        if (gateCycle.request(id.c_str(), millis()))
-          Serial.println(F("[AUTO] Accepted ENTRY gate request - Cho xe vao"));
+      // Mở barrier NGAY KHI NHẬN LỆNH từ Backend/ESP, không chờ detected == 3
+      if (gateCycle.request(id.c_str(), millis())) {
+        openGate();
+        Serial.println(F("\n============================================="));
+        Serial.println(F(">>> [ENTRY ACTION] MO BARRIER NGAY CHO XE VAO <<<"));
+        Serial.println(F("=============================================\n"));
       }
     } else if (line.equalsIgnoreCase("CLOSE")) {
       if (gateCycle.cancel()) closeGate();
@@ -291,7 +286,7 @@ void sendStatusToEsp() {
 void handleGateLogic() {
   GateCycle::Action action = gateCycle.sample(readGateDistance(), millis());
   isCarInFront = gateCycle.present;
-  webOpenRequested = strcmp(gateCycle.phase, "WAITING") == 0 || (gateCycle.isExit && strcmp(gateCycle.phase, "OPEN") == 0);
+  webOpenRequested = gateCycle.opened;
   if (action == GateCycle::RAISE) openGate();
   if (action == GateCycle::LOWER) closeGate();
 }

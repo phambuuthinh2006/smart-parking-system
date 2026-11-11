@@ -98,6 +98,47 @@ class WebLinkTests(unittest.TestCase):
         self.assertIsNone(p.next(state))
 
 
+    def test_encounter_lock_and_format_filter(self):
+        class DummyLink:
+            direction = "AUTO"
+            def call(self, path, body=None):
+                return {"outcome": "ENTRY_PENDING", "plate": "36H-123.45"}
+
+        uploader = PlateUploader(DummyLink())
+        try:
+            # 1. Invalid formats should be ignored
+            uploader.submit("INVALID_PLATE")
+            uploader.submit("123")
+            uploader.submit("ABCDE")
+            self.assertTrue(uploader.pending.empty())
+
+            # 2. Valid plate should be accepted and processed
+            uploader.submit("36H-123.45")
+            # Wait for thread to process and lock encounter
+            import time
+            for _ in range(50):
+                if uploader.encounter_locked:
+                    break
+                time.sleep(0.05)
+            self.assertTrue(uploader.encounter_locked)
+
+            # 3. Subsequent submit while locked should be ignored
+            uploader.submit("36H-999.99")
+            self.assertTrue(uploader.pending.empty())
+
+            # 4. Simulate car leaves (empty frame for >= 2s) and new car arrives
+            t0 = time.monotonic()
+            uploader.encounter.observe(False, t0)
+            uploader.encounter.observe(False, t0 + 2.5)
+            self.assertTrue(uploader.encounter.cleared)
+            uploader.encounter.observe(True, t0 + 3.0)
+
+            # Encounter should now be unlocked!
+            self.assertFalse(uploader.encounter_locked)
+        finally:
+            uploader.close()
+
+
 if __name__ == '__main__':
     unittest.main()
 

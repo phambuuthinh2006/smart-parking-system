@@ -355,6 +355,8 @@ public class AccessStore {
     return Boolean.TRUE.equals(db.queryForObject("SELECT EXISTS(SELECT 1 FROM parking_space WHERE id='P01' AND status=? AND last_reported_at > now()-interval '5 seconds')", Boolean.class, status));
   }
 
+  // Ngưỡng phát hiện xe trước cổng đã được hiệu chỉnh < 8cm (trên Uno firmware)
+  // và phản ánh qua cột gate_present (boolean) trong barrier_hardware.
   private boolean gateReady() {
     return Boolean.TRUE.equals(db.queryForObject("SELECT EXISTS(SELECT 1 FROM barrier_hardware WHERE id=1 AND position='CLOSED' AND gate_present AND gate_sensor_valid AND last_seen_at > now()-interval '5 seconds')", Boolean.class));
   }

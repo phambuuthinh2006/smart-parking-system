@@ -1,4 +1,5 @@
 import argparse
+import re
 import cv2
 from camera_io import open_camera
 from web_link import HttpLink, PlateUploader, describe_http_error
@@ -49,8 +50,9 @@ def main():
                 )
                 plate_text = " ".join(text).strip()
 
-                # Khi OCR đọc được biển số -> Gửi lên Web Backend qua HTTP (chạy ngầm, tự lọc trùng 3s)
-                if plate_text:
+                # Khi OCR đọc được biển số -> Kiểm tra định dạng cơ bản trước khi gửi
+                norm = "".join(c for c in plate_text.upper() if c not in " .-\t\r\n")
+                if plate_text and re.match(r'^\d{2}[A-Z]{1,2}\d{4,6}$', norm):
                     web.submit(plate_text)
 
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)

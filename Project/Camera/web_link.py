@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import queue
+import re
 import threading
 import time
 import uuid
@@ -98,15 +99,18 @@ class CameraEncounter:
 
     Uses plate REGION presence, not OCR success, so OCR noise is not a departure.
     """
-    def __init__(self):
+    def __init__(self, on_new_encounter=None):
         self.id = str(uuid.uuid4())
         self.empty_since = None
         self.cleared = False
+        self.on_new_encounter = on_new_encounter
 
     def observe(self, present, now):
         if present:
             if self.cleared:
                 self.id = str(uuid.uuid4())
+                if callable(self.on_new_encounter):
+                    self.on_new_encounter()
             self.empty_since = None
             self.cleared = False
         else:
@@ -126,9 +130,16 @@ class PlateUploader:
         self.last_at = 0
         self.recent = {}
         self.last_result = None
-        self.encounter = CameraEncounter()
+        self.encounter_locked = False
+        self.encounter = CameraEncounter(on_new_encounter=self.unlock_encounter)
         self.thread = threading.Thread(target=self._send_loop, daemon=True)
         self.thread.start()
+
+    def lock_encounter(self):
+        self.encounter_locked = True
+
+    def unlock_encounter(self):
+        self.encounter_locked = False
 
     def observe_frame(self, plate_region_present):
         return self.encounter.observe(plate_region_present, time.monotonic())
@@ -138,6 +149,15 @@ class PlateUploader:
         text = str(text).strip()
         now = time.monotonic()
         normalized = "".join(c for c in text.upper() if c not in " .-\t\r\n")
+
+        # 1. Lọc định dạng biển số hợp lệ (2 số, 1-2 chữ, 4-6 số)
+        if not re.match(r'^\d{2}[A-Z]{1,2}\d{4,6}$', normalized):
+            return
+
+        # 2. Kiểm tra khóa encounter: Đã được Backend duyệt thì không gửi spam nữa
+        if self.encounter_locked:
+            return
+
         if not text or len(text) > 100 or now-self.recent.get(normalized, float('-inf')) < 3:
             return
         self.recent = {key: at for key, at in self.recent.items() if now-at < 3}
@@ -181,6 +201,12 @@ class PlateUploader:
                 if result_key != self.last_result:
                     print(f"[HTTP CAMERA] Đã gửi biển '{event['plateText']}' -> Web phản hồi: {outcome}", flush=True)
                     self.last_result = result_key
+
+                # Nếu Backend duyệt thành công -> khóa encounter để tránh OCR rác ghi đè
+                if outcome in ("ENTRY_PENDING", "EXIT_PENDING", "WAITING_PARKING", "ENCOUNTER_USED"):
+                    self.lock_encounter()
+                    print(f"[HTTP CAMERA] Đã khóa encounter ({outcome}) - Tạm ngừng gửi đọc biển cho tới khi xe mới tới", flush=True)
+
                 offline = False
             except Exception as exc:
                 if not offline:
