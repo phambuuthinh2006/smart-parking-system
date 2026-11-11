@@ -43,6 +43,11 @@ public class AccessController {
     return parking.snapshot().access();
   }
 
+  @PostMapping("/access/reset")
+  public AccessData.Result reset() {
+    return parking.resetAccess();
+  }
+
   @PostMapping("/device/barrier-feedback")
   public AccessData.Result hardware(@Valid @RequestBody AccessData.HardwareReport report) {
     return parking.hardwareFeedback(report);

@@ -165,12 +165,12 @@ public class AccessStore {
     else if (current != null && current.status().equals("PENDING_PARKING")) {
       outcome = "WAITING_PARKING"; visitId = current.id();
     }
-    else if (auto && current != null && (current.status().equals("PENDING_ENTRY") || current.status().equals("PENDING_EXIT"))) {
+    else if (auto && current != null && (current.status().equals("PENDING_ENTRY") || (current.status().equals("PENDING_EXIT") && barrier.position().equals("OPEN")))) {
       outcome = current.status().equals("PENDING_ENTRY") ? "ENTRY_PENDING" : "EXIT_PENDING"; visitId = current.id();
     }
-    else if (auto && !gateReady()) outcome = "WAITING_GATE_SENSOR";
-    else if (auto && direction == Direction.EXIT && (!slotIs("AVAILABLE") || current.slotLeftAt() == null)) outcome = "SLOT_STILL_OCCUPIED";
+    else if (auto && direction == Direction.ENTRY && !gateReady()) outcome = "WAITING_GATE_SENSOR";
     else if (auto && direction == Direction.ENTRY && !slotIs("AVAILABLE")) outcome = "SLOT_NOT_READY";
+    else if (auto && direction == Direction.EXIT && (!slotIs("AVAILABLE") || current == null || current.slotLeftAt() == null)) outcome = "SLOT_STILL_OCCUPIED";
     else if (direction == Direction.ENTRY && current != null) {
       outcome = current.status().equals("PENDING_ENTRY")
         ? "ENTRY_PENDING"
@@ -198,9 +198,6 @@ public class AccessStore {
         opened = true;
         outcome = "ENTRY_PENDING";
       }
-    } else if (!current.status().equals("INSIDE")) {
-      outcome = "EXIT_PENDING";
-      visitId = current.id();
     } else {
       visitId = current.id();
       db.update(
@@ -379,8 +376,23 @@ public class AccessStore {
       db.update("UPDATE vehicle_visit SET slot_left_at=NULL WHERE status='INSIDE'");
     } else if (slotIs("AVAILABLE")) {
       db.update("UPDATE vehicle_visit SET slot_clear_confirmed_at=? WHERE status='PENDING_PARKING' AND slot_clear_confirmed_at IS NULL AND gate_entered_at<=?", Timestamp.from(now), Timestamp.from(now));
-      db.update("UPDATE vehicle_visit SET slot_left_at=? WHERE status='INSIDE' AND slot_left_at IS NULL", Timestamp.from(now));
+      var leaving = db.query("SELECT * FROM vehicle_visit WHERE status='INSIDE'", this::visit);
+      for (Visit v : leaving) {
+        db.update("UPDATE vehicle_visit SET status='PENDING_EXIT', slot_left_at=? WHERE id=?", Timestamp.from(now), v.id());
+        db.update("INSERT INTO vehicle_access_event(event_id,kind,plate,direction,source,outcome,visit_id,created_at) VALUES (?,'SLOT',?,'EXIT','DEVICE','SLOT_LEFT',?,?)",
+          UUID.nameUUIDFromBytes(("leaving:" + v.id()).getBytes(java.nio.charset.StandardCharsets.UTF_8)), v.plate(), v.id(), Timestamp.from(now));
+        db.update("UPDATE camera_latest SET outcome='SLOT_LEFT' WHERE plate=?", v.plate());
+      }
     }
+  }
+
+  @Transactional(propagation = Propagation.MANDATORY)
+  public void resetActiveVisits(Instant now) {
+    db.update("UPDATE vehicle_visit SET status='CANCELLED' WHERE status IN ('PENDING_ENTRY','PENDING_PARKING','INSIDE','PENDING_EXIT')");
+    db.update("UPDATE virtual_barrier SET position='CLOSED',version=version+1,pending_visit_id=NULL,direction=NULL,reason='RESET',updated_at=? WHERE id=1", Timestamp.from(now));
+    db.update("UPDATE barrier_hardware SET position='CLOSED',phase='IDLE',request_id=NULL WHERE id=1");
+    db.update("DELETE FROM camera_encounter");
+    db.update("UPDATE camera_latest SET outcome='RESET', received_at=? WHERE id=1", Timestamp.from(now));
   }
 
   private Visit visit(ResultSet r, int row) throws SQLException {

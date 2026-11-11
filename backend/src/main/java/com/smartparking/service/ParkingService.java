@@ -229,6 +229,14 @@ public class ParkingService {
     return new AccessData.Result(applied.outcome(), applied.visitId(), applied.duplicate(), publish());
   }
 
+  @Transactional
+  public AccessData.Result resetAccess() {
+    lockDevice();
+    Instant now = Instant.now();
+    access.resetActiveVisits(now);
+    return new AccessData.Result("RESET", null, false, publish());
+  }
+
   private void touch(Instant now) {
     db.update(
       "UPDATE device SET online=true,last_seen_at=?,revision=revision+1 WHERE id='esp8266-01'",

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Camera, Plus, Lock, Unlock, Trash2, CheckCircle2, ShieldAlert } from "lucide-react";
+import { Camera, Plus, Lock, Unlock, Trash2, CheckCircle2, ShieldAlert, RotateCcw } from "lucide-react";
 import { outcomeLabel, formatPlateDisplay } from "../services/vehicleAccess";
 
 const base = (import.meta.env.VITE_BACKEND_URL || "").replace(/\/$/, "");
@@ -104,6 +104,20 @@ export default function CameraPlatePanel() {
     }
   }
 
+  async function handleResetVisits() {
+    if (!window.confirm("Đặt lại toàn bộ lượt xe trong bãi? (Dùng khi muốn bắt đầu test chu kỳ mới)")) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`${base}/api/access/reset`, { method: "POST" });
+      if (!res.ok) throw new Error("Không thể đặt lại");
+      setMessage({ type: "success", text: "Đã đặt lại bãi xe về trạng thái ban đầu!" });
+    } catch (err) {
+      setMessage({ type: "error", text: err.message || "Lỗi đặt lại" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const enabledCount = registered.filter((item) => item.enabled).length;
 
   return (
@@ -114,7 +128,20 @@ export default function CameraPlatePanel() {
           <h2>Camera & Quản lý biển số xe</h2>
           <p>Nhận diện AI → kiểm tra danh sách đăng ký → tự động mở cổng barrier.</p>
         </div>
-        <span className="access-source">{connected ? "Đã kết nối backend" : "Mất kết nối backend"}</span>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center", marginLeft: "auto" }}>
+          <button
+            type="button"
+            className="plate-btn-toggle btn-unlock"
+            style={{ padding: "4px 8px", fontSize: "12px", border: "1px solid #cbd5e1", borderRadius: "6px" }}
+            onClick={handleResetVisits}
+            disabled={busy || !connected}
+            title="Xóa các lượt xe đang dở dang để test chu kỳ mới"
+          >
+            <RotateCcw size={13} />
+            <span>Reset lượt xe</span>
+          </button>
+          <span className="access-source">{connected ? "Đã kết nối backend" : "Mất kết nối backend"}</span>
+        </div>
       </div>
 
       <div className="camera-plate-content" aria-live="polite">
