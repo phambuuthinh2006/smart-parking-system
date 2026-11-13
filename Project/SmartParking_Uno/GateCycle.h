@@ -6,9 +6,9 @@
 // Ngưỡng cảm biến cổng calibrated: < 10.0cm là có xe đứng trước/dưới cổng (độ nhạy lý tưởng cho mô hình bàn học).
 static const float GATE_THRESHOLD = 10.0f;
 static const uint32_t MIN_OPEN_MS = 1200;            // Thời gian tối thiểu sau khi mở (1.2s)
-static const uint32_t CLEAR_PASSAGE_MS = 5000;       // Trống liên tục >= 5000ms để xác nhận xe đã qua (PASSED)
+static const uint32_t CLEAR_PASSAGE_MS = 2500;       // Trống liên tục >= 5000ms để xác nhận xe đã qua (PASSED)
 static const uint32_t TIMEOUT_CANCEL_MS = 20000;     // Timeout không có xe qua (20s)
-static const uint32_t FORCE_LOWER_MS = 30000;        // Hạ bắt buộc tối đa (30s)
+// static const uint32_t FORCE_LOWER_MS = 36000000;        // Hạ bắt buộc tối đa (10h)
 static const uint32_t MANUAL_CLOSE_CLEAR_MS = 1000;  // Đóng thủ công chỉ khi trống liên tục >= 1000ms
 
 class GateCycle {
@@ -130,15 +130,15 @@ class GateCycle {
       }
 
       // 3. Hạ bắt buộc sau 30 giây để tránh kẹt vĩnh viễn
-      if (now - openedAt >= FORCE_LOWER_MS) {
-        opened = false;
-        isExit = false;
-        carSeen = false;
-        clearSince = 0;
-        lastSampleAt = 0;
-        phase = "CANCELLED";
-        return LOWER;
-      }
+      // if (now - openedAt >= FORCE_LOWER_MS) {
+      //   opened = false;
+      //   isExit = false;
+      //   carSeen = false;
+      //   clearSince = 0;
+      //   lastSampleAt = 0;
+      //   phase = "CANCELLED";
+      //   return LOWER;
+      // }
     }
 
     return NONE;

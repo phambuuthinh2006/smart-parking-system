@@ -59,7 +59,7 @@ const float SLOT_THRESHOLD = 10.0;
 const float GATE_SENSOR_THRESHOLD = 10.0;
 
 // Ngưỡng nhiệt độ cảnh báo cháy (°C)
-const float TEMP_THRESHOLD = 45.0;
+const float TEMP_THRESHOLD = 50.0;
 
 // Ngưỡng cảm biến ánh sáng LDR trên Uno R3 (ADC 10-bit: 0 - 1023)
 const int LDR_ON  = 400;   // Dưới 400: Trời tối -> BẬT ĐÈN
